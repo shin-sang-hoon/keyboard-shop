@@ -1,0 +1,17 @@
+# Spring Boot
+backend/src/main/resources/application.properties
+backend/src/main/resources/application.yml
+backend/build/
+backend/.gradle/
+
+# React
+frontend/node_modules/
+frontend/dist/
+
+# GLB 모델 (용량 큰 파일)
+frontend/public/models/
+frontend/src/assets/models/
+
+# 기타
+.DS_Store
+*.log
