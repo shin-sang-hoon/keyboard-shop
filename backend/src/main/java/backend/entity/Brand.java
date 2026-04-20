@@ -23,6 +23,8 @@ public class Brand {
 
     private String logoUrl;
 
+    private String description;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 

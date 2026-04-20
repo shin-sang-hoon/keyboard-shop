@@ -1,25 +1,25 @@
 package backend.dto;
 
 import lombok.*;
-import java.util.List;
 
-public class CategoryDto {
+public class BrandDto {
 
     @Getter @Setter
     @NoArgsConstructor @AllArgsConstructor
     @Builder
     public static class Request {
         private String name;
-        private String slug;
-        private Long parentId;
+        private String logoUrl;
+        private String description;
     }
 
-    @Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor
+    @Getter @Setter
+    @NoArgsConstructor @AllArgsConstructor
+    @Builder
     public static class Response {
         private Long id;
         private String name;
-        private String slug;
-        private Long parentId;
-        private List<Response> children;
+        private String logoUrl;
+        private String description;
     }
 }
