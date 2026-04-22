@@ -16,3 +16,5 @@ frontend/src/assets/models/
 .DS_Store
 *.log
 fastapi/venv/
+"__pycache__/" 
+"*.pyc" 
