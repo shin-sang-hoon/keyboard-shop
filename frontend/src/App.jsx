@@ -1,7 +1,7 @@
-import KeyboardViewer from './KeyboardViewer'
+import KeyboardBuilder from './KeyboardBuilder'
 
 function App() {
-  return <KeyboardViewer />
+  return <KeyboardBuilder />
 }
 
 export default App
