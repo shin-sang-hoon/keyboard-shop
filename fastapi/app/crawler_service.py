@@ -40,12 +40,12 @@ BRAND_HEADERS = {
 
 # ── 1단계: 네이버 쇼핑 오픈 API ─────────────────────────────────────────────
 
-async def search_naver_products(query: str, display: int = 100) -> list:
+async def search_naver_products(query: str, display: int = 100, start: int = 1) -> list:
     headers = {
         "X-Naver-Client-Id":     NAVER_CLIENT_ID,
         "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
     }
-    params = {"query": query, "display": display, "start": 1, "sort": "sim"}
+    params = {"query": query, "display": display, "start": start, "sort": "sim"}
     async with httpx.AsyncClient(timeout=15) as client:
         res = await client.get(NAVER_SHOP_URL, headers=headers, params=params)
         res.raise_for_status()
@@ -102,6 +102,34 @@ async def fetch_keychron_brand_products() -> list:
                     print(f"  [2단계] 신상품 ID {len(ids)}개 수집")
         except Exception as e:
             print(f"  [2단계] 신상품 오류: {e}")
+
+        # 전체 상품 페이지네이션
+        page = 1
+        while True:
+            try:
+                res = await client.get(
+                    f"{KEYCHRON_API_BASE}/products",
+                    params={"page": page, "pageSize": 100, "sort": "POPULAR"}
+                )
+                if res.status_code != 200:
+                    break
+                data = res.json()
+                # 응답 구조: {"products": [...]} 또는 리스트
+                items = data.get("products", data) if isinstance(data, dict) else data
+                if not isinstance(items, list) or not items:
+                    break
+                ids = [item.get("id") or item.get("productId") for item in items if item.get("id") or item.get("productId")]
+                if not ids:
+                    break
+                product_ids.extend(ids)
+                print(f"  [2단계] 전체상품 {page}페이지 → {len(ids)}개")
+                if len(ids) < 100:
+                    break
+                page += 1
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                print(f"  [2단계] 전체상품 페이지 오류: {e}")
+                break
 
         # 중복 제거
         product_ids = list(dict.fromkeys(product_ids))
@@ -191,12 +219,12 @@ def normalize_brand_item(item: dict) -> Optional[dict]:
 def _extract_layout(name: str) -> Optional[str]:
     n = name.upper()
     if "TKL" in n or "80%" in n:   return "TKL"
-    if "75%" in n or " 75 " in n:  return "75"
+    if "75%" in n or " 75 " in n or "EX75" in n or "V3" in n.upper():  return "75"
     if "65%" in n or " 65 " in n:  return "65"
     if "60%" in n or " 60 " in n:  return "60"
     if "40%" in n or " 40 " in n:  return "40"
     if "100%" in n or "FULL" in n: return "FULL"
-    # K-시리즈 모델명으로 추론 (예: K2=75%, K6=65%, K8=TKL, K10=FULL)
+    # K-시리즈 모델명으로 추론
     m = re.search(r'\bK(\d+)\b', name, re.IGNORECASE)
     if m:
         num = int(m.group(1))
@@ -204,6 +232,23 @@ def _extract_layout(name: str) -> Optional[str]:
         if num in (6, 14):        return "65"
         if num in (8, 9, 17):     return "TKL"
         if num in (10, 4):        return "FULL"
+    # B-시리즈
+    m = re.search(r'\bB(\d+)\b', name, re.IGNORECASE)
+    if m:
+        num = int(m.group(1))
+        if num in (1,):   return "75"
+        if num in (6,):   return "FULL"
+    # V-시리즈
+    m = re.search(r'\bV(\d+)\b', name, re.IGNORECASE)
+    if m:
+        num = int(m.group(1))
+        if num in (3, 6): return "TKL"
+        if num in (10,):  return "FULL"
+    # C-시리즈
+    m = re.search(r'\bC(\d+)\b', name, re.IGNORECASE)
+    if m:
+        num = int(m.group(1))
+        if num in (2,):   return "FULL"
     return None
 
 def _extract_switch_type(name: str) -> Optional[str]:
@@ -224,6 +269,7 @@ def _extract_switch_type(name: str) -> Optional[str]:
     if "바나나축" in name: return "LINEAR"   # Keychron Banana = 저소음 리니어
     if "민트축"   in name: return "TACTILE"  # Keychron Mint   = 택타일
     if "라벤더축" in name: return "LINEAR"   # Keychron Lavender = 리니어
+    if "자석축" in name: return "LINEAR"   # TMR 자석축 = 리니어 계열
     # 팬터그래프(저소음 가위식) → 별도 타입이지만 LINEAR에 가장 가까움
     if "팬터그래프" in name or "팬타그래프" in name or "Pantograph" in name:
         return "LINEAR"
@@ -237,6 +283,9 @@ def _extract_connection(name: str) -> Optional[str]:
         return "WIRELESS"
     if "유선" in name or "WIRED" in n:
         return "WIRED"
+    # Keychron 모델명 기반 추론 (PRO MAX / PRO SE = 무선)
+    if re.search(r'\b(K|V|B)\d+\s+PRO\s+(MAX|SE)', name, re.IGNORECASE):
+        return "WIRELESS"
     return None
 
 def _extract_connection_from_category(category: str) -> Optional[str]:
@@ -289,14 +338,38 @@ async def run_crawler(enable_playwright: bool = True) -> dict:
 
     # ── 1단계 ─────────────────────────────────────────────────────────────────
     stage1_products: list = []
-    for query in ["키크론 키보드", "Keychron keyboard"]:
-        try:
-            items = await search_naver_products(query)
-            stage1_products.extend([normalize_naver_item(i) for i in items])
-            print(f"[1단계] '{query}' → {len(items)}개")
-            await asyncio.sleep(1.0)
-        except Exception as e:
-            print(f"[1단계] 오류: {e}")
+    queries = [
+        # 브랜드 기본
+        "키크론 키보드", "Keychron keyboard", "키크론",
+        # 연결방식
+        "키크론 무선 키보드", "키크론 블루투스 키보드", "키크론 유선 키보드",
+        "keychron 무선", "keychron 블루투스", "keychron 유선",
+        # 스위치
+        "키크론 기계식 키보드", "키크론 저소음 키보드", "키크론 슬림 키보드",
+        "keychron 기계식", "keychron 저소음",
+        # 폼팩터
+        "keychron 텐키리스", "keychron 풀배열", "keychron 75%",
+        "키크론 텐키리스", "키크론 풀배열",
+        # 시리즈
+        "keychron K 시리즈", "keychron V 시리즈", "keychron Q 시리즈",
+        "키크론 K2", "키크론 K8", "키크론 K10",
+        "keychron 게이밍",
+        # 주변기기
+        "키크론 마우스", "키크론 키캡", "키크론 스위치",
+        "keychron 키캡", "keychron 마우스",
+    ]
+    for query in queries:
+        for start in [1, 101]:  # 1페이지 + 2페이지
+            try:
+                items = await search_naver_products(query, display=100, start=start)
+                if not items:
+                    break
+                stage1_products.extend([normalize_naver_item(i) for i in items])
+                print(f"[1단계] '{query}' (start={start}) → {len(items)}개")
+                await asyncio.sleep(0.7)
+            except Exception as e:
+                print(f"[1단계] 오류: {e}")
+                break
 
     seen = set()
     unique: list = []
