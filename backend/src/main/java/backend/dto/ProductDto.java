@@ -21,6 +21,7 @@ public class ProductDto {
         private String connectionType;
         private String gbStatus;
         private String sourceId;
+        private String glbUrl;
         private Product.ProductStatus status;
     }
 
@@ -40,6 +41,7 @@ public class ProductDto {
         private String connectionType;
         private String gbStatus;
         private String sourceId;
+        private String glbUrl;
         private Product.ProductStatus status;
         private LocalDateTime createdAt;
     }

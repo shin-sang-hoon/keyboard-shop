@@ -104,6 +104,7 @@ public class InternalCrawlerService {
             product.setSwitchType(request.getSwitchType());
             product.setMountingType(request.getMountingType());
             product.setConnectionType(request.getConnectionType());
+            if (request.getGlbUrl() != null) product.setGlbUrl(request.getGlbUrl());
             product.setBrand(brand);
             return InternalProductDtos.UpsertResponse.builder()
                     .productId(product.getId())
@@ -119,6 +120,7 @@ public class InternalCrawlerService {
                     .switchType(request.getSwitchType())
                     .mountingType(request.getMountingType())
                     .connectionType(request.getConnectionType())
+                    .glbUrl(request.getGlbUrl())
                     .brand(brand)
                     .build();
             Product saved = productRepository.save(product);

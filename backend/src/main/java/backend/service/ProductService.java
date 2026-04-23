@@ -115,6 +115,7 @@ public class ProductService {
                 .mountingType(p.getMountingType())
                 .connectionType(p.getConnectionType())
                 .gbStatus(p.getGbStatus())
+                .glbUrl(p.getGlbUrl())
                 .sourceId(p.getSourceId())
                 .status(p.getStatus())
                 .createdAt(p.getCreatedAt())

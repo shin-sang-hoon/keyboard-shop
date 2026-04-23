@@ -50,6 +50,8 @@ public class Product {
 
     private String gbStatus;
 
+    private String glbUrl;
+
     @Enumerated(EnumType.STRING)
     @Builder.Default
     private ProductStatus status = ProductStatus.ACTIVE;

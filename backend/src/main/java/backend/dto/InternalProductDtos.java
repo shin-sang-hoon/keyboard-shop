@@ -19,6 +19,7 @@ public class InternalProductDtos {
         private String switchType;
         private String mountingType;
         private String connectionType;
+        private String glbUrl;
     }
 
     @Getter @Setter
