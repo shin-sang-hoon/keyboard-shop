@@ -1,5 +1,7 @@
 package backend.service;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import backend.dto.ProductDto;
 import backend.entity.Brand;
 import backend.entity.Category;
@@ -13,9 +15,6 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
-import java.util.stream.Collectors;
-
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -25,11 +24,26 @@ public class ProductService {
     private final BrandRepository brandRepository;
     private final CategoryRepository categoryRepository;
 
-    @Cacheable(value = "products")
-    public List<ProductDto.Response> getAllProducts() {
-        return productRepository.findAll().stream()
-                .map(this::toResponse)
-                .collect(Collectors.toList());
+    /**
+     * 상품 목록 조회 — 페이지네이션 + 검색
+     *
+     * 캐시 전략: (검색어 + 페이지번호 + 페이지크기) 조합을 키로 사용.
+     *  - 메인 화면 첫 페이지 (search=null, page=0) 가 가장 많이 조회됨 → 캐시 효과 큼
+     *  - 검색어가 다양해도 동일 검색어 내 같은 페이지는 캐시 적중
+     *  - 검색어 trim/소문자 정규화는 호출 측이 아닌 여기서 한 번에 처리
+     */
+    @Cacheable(
+            value = "products",
+            key = "(#search == null ? 'all' : #search.trim().toLowerCase()) + '-' + #pageable.pageNumber + '-' + #pageable.pageSize"
+    )
+    public Page<ProductDto.Response> getAllProducts(String search, Pageable pageable) {
+        Page<Product> page;
+        if (search != null && !search.isBlank()) {
+            page = productRepository.findByNameContainingIgnoreCase(search.trim(), pageable);
+        } else {
+            page = productRepository.findAll(pageable);
+        }
+        return page.map(this::toResponse);
     }
 
     public ProductDto.Response getProduct(Long id) {
