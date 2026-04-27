@@ -1,12 +1,12 @@
 package backend.controller;
 
+import backend.dto.PagedResponse;
 import backend.dto.ProductDto;
 import backend.entity.Product.ProductType;
 import backend.service.ProductService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
@@ -31,19 +31,17 @@ public class ProductController {
      *  - productType (optional)       enum: KEYBOARD/MOUSE/SWITCH_PART/ACCESSORY/NOISE/UNCLASSIFIED
      *  - sort (default: createdAt,desc)
      *
-     * 예시:
-     *  GET /api/products
-     *  GET /api/products?search=K10
-     *  GET /api/products?productType=KEYBOARD&page=0&size=20
-     *  GET /api/products?search=Keychron&productType=MOUSE
+     * 응답: PagedResponse<ProductDto.Response>
+     *   PageImpl 직접 직렬화 시 미래 Spring Data 호환성 경고 - PagedResponse 로 wrap
      */
     @GetMapping
     @Operation(summary = "상품 목록 조회 (페이지네이션 + 검색 + 타입 필터)")
-    public ResponseEntity<Page<ProductDto.Response>> getAllProducts(
+    public ResponseEntity<PagedResponse<ProductDto.Response>> getAllProducts(
             @RequestParam(required = false) String search,
             @RequestParam(required = false) ProductType productType,
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
-        return ResponseEntity.ok(productService.getAllProducts(search, productType, pageable));
+        return ResponseEntity.ok(
+                PagedResponse.from(productService.getAllProducts(search, productType, pageable)));
     }
 
     @GetMapping("/{id}")
