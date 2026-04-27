@@ -6,6 +6,7 @@ import backend.dto.ProductDto;
 import backend.entity.Brand;
 import backend.entity.Category;
 import backend.entity.Product;
+import backend.entity.Product.ProductType;
 import backend.repository.BrandRepository;
 import backend.repository.CategoryRepository;
 import backend.repository.ProductRepository;
@@ -25,21 +26,29 @@ public class ProductService {
     private final CategoryRepository categoryRepository;
 
     /**
-     * 상품 목록 조회 — 페이지네이션 + 검색
+     * 상품 목록 조회 - 페이지네이션 + 검색 + productType 필터
      *
-     * 캐시 전략: (검색어 + 페이지번호 + 페이지크기) 조합을 키로 사용.
-     *  - 메인 화면 첫 페이지 (search=null, page=0) 가 가장 많이 조회됨 → 캐시 효과 큼
-     *  - 검색어가 다양해도 동일 검색어 내 같은 페이지는 캐시 적중
-     *  - 검색어 trim/소문자 정규화는 호출 측이 아닌 여기서 한 번에 처리
+     * 캐시 키: search + productType + page + size 조합
+     *  - 4가지 분기 (search/productType 각각 null 여부) 별로 분리 캐싱
+     *  - 메인 화면 첫 페이지 (search=null, productType=null) 가 가장 많이 hit
      */
     @Cacheable(
             value = "products",
-            key = "(#search == null ? 'all' : #search.trim().toLowerCase()) + '-' + #pageable.pageNumber + '-' + #pageable.pageSize"
+            key = "(#search == null ? 'all' : #search.trim().toLowerCase()) + '-' " +
+                  "+ (#productType == null ? 'any' : #productType.name()) + '-' " +
+                  "+ #pageable.pageNumber + '-' + #pageable.pageSize"
     )
-    public Page<ProductDto.Response> getAllProducts(String search, Pageable pageable) {
+    public Page<ProductDto.Response> getAllProducts(String search, ProductType productType, Pageable pageable) {
         Page<Product> page;
-        if (search != null && !search.isBlank()) {
-            page = productRepository.findByNameContainingIgnoreCase(search.trim(), pageable);
+        boolean hasSearch = search != null && !search.isBlank();
+        String trimmed = hasSearch ? search.trim() : null;
+
+        if (hasSearch && productType != null) {
+            page = productRepository.findByNameContainingIgnoreCaseAndProductType(trimmed, productType, pageable);
+        } else if (hasSearch) {
+            page = productRepository.findByNameContainingIgnoreCase(trimmed, pageable);
+        } else if (productType != null) {
+            page = productRepository.findByProductType(productType, pageable);
         } else {
             page = productRepository.findAll(pageable);
         }
