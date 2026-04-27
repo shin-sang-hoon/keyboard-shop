@@ -40,8 +40,7 @@ public class ProductController {
             @RequestParam(required = false) String search,
             @RequestParam(required = false) ProductType productType,
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
-        return ResponseEntity.ok(
-                PagedResponse.from(productService.getAllProducts(search, productType, pageable)));
+        return ResponseEntity.ok(productService.getAllProducts(search, productType, pageable));
     }
 
     @GetMapping("/{id}")

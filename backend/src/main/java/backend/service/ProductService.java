@@ -3,6 +3,7 @@ package backend.service;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import backend.dto.ProductDto;
+import backend.dto.PagedResponse;
 import backend.entity.Brand;
 import backend.entity.Category;
 import backend.entity.Product;
@@ -33,12 +34,12 @@ public class ProductService {
      *  - 메인 화면 첫 페이지 (search=null, productType=null) 가 가장 많이 hit
      */
     @Cacheable(
-            value = "products",
+            value = "products_v2",
             key = "(#search == null ? 'all' : #search.trim().toLowerCase()) + '-' " +
-                  "+ (#productType == null ? 'any' : #productType.name()) + '-' " +
-                  "+ #pageable.pageNumber + '-' + #pageable.pageSize"
+                    "+ (#productType == null ? 'any' : #productType.name()) + '-' " +
+                    "+ #pageable.pageNumber + '-' + #pageable.pageSize"
     )
-    public Page<ProductDto.Response> getAllProducts(String search, ProductType productType, Pageable pageable) {
+    public PagedResponse<ProductDto.Response> getAllProducts(String search, ProductType productType, Pageable pageable) {
         Page<Product> page;
         boolean hasSearch = search != null && !search.isBlank();
         String trimmed = hasSearch ? search.trim() : null;
@@ -52,7 +53,7 @@ public class ProductService {
         } else {
             page = productRepository.findAll(pageable);
         }
-        return page.map(this::toResponse);
+        return PagedResponse.from(page.map(this::toResponse));
     }
 
     public ProductDto.Response getProduct(Long id) {
@@ -62,7 +63,7 @@ public class ProductService {
     }
 
     @Transactional
-    @CacheEvict(value = "products", allEntries = true)
+    @CacheEvict(value = "products_v2", allEntries = true)
     public ProductDto.Response createProduct(ProductDto.Request request) {
         Brand brand = request.getBrandId() != null ?
                 brandRepository.findById(request.getBrandId()).orElse(null) : null;
@@ -90,7 +91,7 @@ public class ProductService {
     }
 
     @Transactional
-    @CacheEvict(value = "products", allEntries = true)
+    @CacheEvict(value = "products_v2", allEntries = true)
     public ProductDto.Response updateProduct(Long id, ProductDto.Request request) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("상품을 찾을 수 없습니다."));
@@ -118,7 +119,7 @@ public class ProductService {
     }
 
     @Transactional
-    @CacheEvict(value = "products", allEntries = true)
+    @CacheEvict(value = "products_v2", allEntries = true)
     public void deleteProduct(Long id) {
         productRepository.deleteById(id);
     }
