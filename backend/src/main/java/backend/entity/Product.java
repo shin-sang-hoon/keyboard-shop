@@ -56,6 +56,11 @@ public class Product {
     @Builder.Default
     private ProductStatus status = ProductStatus.ACTIVE;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "product_type")
+    @Builder.Default
+    private ProductType productType = ProductType.UNCLASSIFIED;
+
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL)
     @Builder.Default
     private List<ProductTag> productTags = new ArrayList<>();
@@ -70,5 +75,14 @@ public class Product {
 
     public enum ProductStatus {
         ACTIVE, INACTIVE, SOLD_OUT
+    }
+
+    public enum ProductType {
+        KEYBOARD,      // 키보드 본체 (메인 상품) - 1880개
+        MOUSE,         // 마우스 - 186 + 24 = 210개
+        SWITCH_PART,   // 스위치 교체 부품 - 172개
+        ACCESSORY,     // 키캡/케이블/팜레스트 등 - 53개
+        NOISE,         // 크롤러 노이즈 - 미정 (Step 3에서 분류)
+        UNCLASSIFIED   // 미분류 (기본값) - 162개
     }
 }
