@@ -22,3 +22,7 @@ __pycache__/
 # Secrets and local files
 fastapi/.env
 *.bak
+
+# Frontend env (local only)
+frontend/.env
+frontend/.env.local
