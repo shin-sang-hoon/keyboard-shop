@@ -2,13 +2,15 @@ package backend.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
 @Entity
 @Table(name = "products")
-@Getter @Setter
+@Getter
+@Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
@@ -64,6 +66,22 @@ public class Product {
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL)
     @Builder.Default
     private List<ProductTag> productTags = new ArrayList<>();
+
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("displayOrder ASC")
+    @Builder.Default
+    private List<ProductImage> images = new ArrayList<>();
+
+    // 편의 메서드 (양방향 동기화)
+    public void addImage(ProductImage image) {
+        images.add(image);
+        image.setProduct(this);
+    }
+
+    public void removeImage(ProductImage image) {
+        images.remove(image);
+        image.setProduct(null);
+    }
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
