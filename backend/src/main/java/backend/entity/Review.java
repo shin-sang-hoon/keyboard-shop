@@ -23,8 +23,11 @@ import java.time.LocalDateTime;
  *  - audit: created_at + updated_at (Review 는 수정 가능 도메인)
  *  - isVerifiedPurchase 필드 미추가 — orderItem 존재 자체가 인증 증거, DTO 에서 파생
  *
+ * 도메인 메서드:
+ *  - updateContent(rating, content): 본인 리뷰 수정. dirty checking 으로 자동 UPDATE.
+ *
  * A6 에 남아있는 작업: ReviewService.create() 에서 "OrderItem.user == 리뷰 작성자" 검증 +
- *                    배송완료 상태 검증 + UNIQUE 위반 시 명시적 예외 변환
+ *                    배송완료 상태 검증 + UNIQUE 위반 시 명시적 예외 변환 → B2 와 묶어 5/3 완료.
  */
 @Entity
 @Table(
@@ -84,5 +87,17 @@ public class Review {
     @PreUpdate
     protected void onUpdate() {
         this.updatedAt = LocalDateTime.now();
+    }
+
+    /**
+     * 도메인 메서드 — 본인 리뷰 수정 (5-H B2).
+     *
+     * Setter 노출 없이 의도가 드러나는 도메인 인터페이스.
+     * @Transactional 영속성 컨텍스트 안에서 호출하면 dirty checking 으로 UPDATE 자동 발행.
+     * Service 가 Review 를 save() 다시 호출할 필요 없음.
+     */
+    public void updateContent(Double rating, String content) {
+        this.rating = rating;
+        this.content = content;
     }
 }
