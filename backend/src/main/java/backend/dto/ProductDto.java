@@ -44,5 +44,15 @@ public class ProductDto {
         private String glbUrl;
         private Product.ProductStatus status;
         private LocalDateTime createdAt;
+
+        // 5-H B1: ProductImage 1:N + Review/QnA 집계 (N+1 방어 — Service 에서 IN 절 일괄 fetch)
+        @Builder.Default
+        private java.util.List<ProductImageDto> images = java.util.Collections.emptyList();
+        private Double ratingAvg;       // null = 리뷰 0건 (프론트에서 "리뷰 없음" 표시)
+        @Builder.Default
+        private Long reviewCount = 0L;
+        @Builder.Default
+        private Long qnaCount = 0L;
+
     }
 }

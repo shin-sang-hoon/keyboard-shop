@@ -5,17 +5,19 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
 
 /**
- * Review 영속성 레포지토리 (5-H A2 + A6 통합).
+ * Review 영속성 레포지토리 (5-H A2 + A6 통합 + B1 batch).
  *
  * 메서드 구성:
  *  - 조회: findByProductId(페이징), findByUserId(마이페이지)
  *  - 집계: countByProductId, findAverageRatingByProductId
  *  - 구매 인증: existsByOrderItemId(작성 전 사전 체크), findByOrderItemId(주문별 리뷰 조회)
+ *  - B1 batch: findReviewStatsByProductIds (목록 페이지 N+1 회피용 IN 절 일괄 집계)
  *
  * UNIQUE(order_item_id) 위반은 DB 가 막지만, Service 에서 existsByOrderItemId 로 사전 검증해
  * 깔끔한 비즈니스 예외(ReviewAlreadyExistsException 등)로 변환하는 게 UX 상 좋음.
@@ -42,4 +44,14 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
 
     /** 마이페이지의 "이 주문의 리뷰" 표시용 — 1 OrderItem 당 최대 1 Review */
     Optional<Review> findByOrderItemId(Long orderItemId);
+
+    /**
+     * 5-H B1: 목록 일괄 집계 — IN 절 1쿼리.
+     * @return Object[]: [productId(Long), count(Long), avgRating(Double)]
+     *         리뷰 0건 product 는 row 없음 (Service 에서 Map.getOrDefault 처리)
+     */
+    @Query("SELECT r.product.id, COUNT(r), AVG(r.rating) " +
+           "FROM Review r WHERE r.product.id IN :productIds " +
+           "GROUP BY r.product.id")
+    List<Object[]> findReviewStatsByProductIds(@Param("productIds") List<Long> productIds);
 }

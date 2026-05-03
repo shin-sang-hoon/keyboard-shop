@@ -14,4 +14,8 @@ public interface ProductImageRepository extends JpaRepository<ProductImage, Long
 
     // 한 상품의 모든 이미지 삭제 (re-crawl 시 cascade 미사용 케이스 대비)
     void deleteByProductId(Long productId);
+
+    // 5-H B1: 목록 일괄 fetch (N+1 회피, IN 절 1쿼리)
+    // product 별 displayOrder 정렬 → Service 에서 Map<productId, List> 로 group
+    List<ProductImage> findByProductIdInOrderByProductIdAscDisplayOrderAsc(List<Long> productIds);
 }
