@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import RatingDistributionChart from '../components/RatingDistributionChart';
 import ProductGallery from '../components/ProductGallery';
+import ProductTabs from '../components/ProductTabs';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
 
@@ -326,12 +327,15 @@ export default function ProductDetail() {
             </button>
 
             {/* 5-H C5: 별점 분포 차트 (B5 stats API 시각화)
-                v3 ProductDetail 풀 재작성 시 '구매평' 탭 안으로 이동 예정 (C1-c) */}
+                C1-c 에서 '구매평' 탭 안으로 이동 예정 */}
             <div style={{ marginTop: 8 }}>
               <RatingDistributionChart productId={product.id} />
             </div>
           </div>
         </div>
+
+        {/* ─── 5-H C1-b: 4-tab nav (sticky) ─────────────────────── */}
+        <ProductTabs product={product} productId={product.id} />
       </div>
 
       <Toast message={toast.message} visible={toast.visible} />
