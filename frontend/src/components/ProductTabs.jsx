@@ -1,31 +1,21 @@
 import { useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import ReviewList from './ReviewList';
 
 /**
- * 상품 상세 4-tab 네비게이션 (5-H C1-b).
+ * 상품 상세 4-tab 네비게이션 (5-H C1-b + C1-c).
  *
- * Swagkey 패턴:
- *   - 4 탭: 상세정보 / 구매평 (N) / Q&A (N) / 반품·교환
- *   - URL 쿼리로 활성 탭 동기화 (?tab=reviews)
- *   - sticky nav — 스크롤 시 상단 고정
- *   - 활성 탭 underline + 글자 진하게
- *   - 카운트 배지 (B1 응답의 reviewCount, qnaCount)
+ * 4 탭: 상세정보 / 구매평 (N) / Q&A (N) / 반품·교환
  *
- * Props:
- *   - product: ProductDto.Response (reviewCount, qnaCount 사용)
- *   - productId: 자식 탭 컴포넌트에 전달용
- *
- * 탭 컨텐츠는 일단 placeholder.
- * C1-c 에서:
- *   - 구매평 탭 → RatingDistributionChart + 리뷰 리스트 lazy load
- *   - Q&A 탭 → B3 미완성 시 placeholder, 완성 후 QnA 리스트
- *   - 반품·교환 → 정적 텍스트 (정책)
+ * C1-c 변경:
+ *   - ReviewsTab placeholder → <ReviewList productId={...} /> 로 교체
+ *   - lazy fetch: 사용자가 '구매평' 탭 클릭하기 전엔 ReviewList 가 마운트 안 됨
+ *     → /reviews API 와 /reviews/stats API 호출 0
+ *   - 탭 클릭 시점에 ReviewList 마운트 → 자동 fetch
  *
  * 면접 포인트:
- *   - useSearchParams 로 URL ↔ state 동기화 (새로고침/뒤로가기 시 탭 유지)
- *   - replace:true 로 history 오염 방지 (브라우저 뒤로가기 자연스럽게)
- *   - sticky positioning (z-index, top, 배경/테두리)
- *   - role='tablist' / 'tab' / 'tabpanel' 접근성 트리
+ *   - 조건부 렌더가 곧 lazy 패턴 (별도 코드 없이 자연스럽게)
+ *   - 다른 탭 (Q&A, 반품) 도 활성 시점에만 렌더 → 불필요한 호출 0
  */
 
 const TABS = [
@@ -58,7 +48,7 @@ export default function ProductTabs({ product, productId }) {
     setSearchParams(next, { replace: true });
   }
 
-  // ─── 키보드 ←/→ 로 탭 이동 (focus 된 상태에서) ────────────────────────
+  // ─── 키보드 ←/→ 로 탭 이동 ─────────────────────────────────────────────
   useEffect(() => {
     function handleKeyDown(e) {
       if (!tabsRef.current?.contains(document.activeElement)) return;
@@ -127,7 +117,7 @@ export default function ProductTabs({ product, productId }) {
         style={S.panel}
       >
         {activeTab === 'detail'  && <DetailTab product={product} />}
-        {activeTab === 'reviews' && <ReviewsTab productId={productId} />}
+        {activeTab === 'reviews' && <ReviewList productId={productId} />}
         {activeTab === 'qna'     && <QnATab productId={productId} />}
         {activeTab === 'refund'  && <RefundTab />}
       </div>
@@ -136,7 +126,7 @@ export default function ProductTabs({ product, productId }) {
 }
 
 // ═════════════════════════════════════════════════════════════════════
-// 탭별 placeholder 컨텐츠 (C1-c 에서 본격 구현)
+// 탭별 컨텐츠 — Reviews 만 ReviewList 로 분리, 나머지는 placeholder
 // ═════════════════════════════════════════════════════════════════════
 
 function DetailTab({ product }) {
@@ -145,26 +135,13 @@ function DetailTab({ product }) {
       <h2 style={S.tabTitle}>상세정보</h2>
       <p style={S.placeholderText}>
         상품 상세 설명 영역입니다.<br />
-        C1-c 에서 description 필드 + 추가 메타 정보가 표시됩니다.
+        백엔드에 description 필드 추가 후 본격 컨텐츠가 표시됩니다.
       </p>
       {product?.brandName && (
         <p style={S.placeholderMeta}>
-          현재는 우측 정보 박스에서 기본 정보를 확인하세요.
+          현재는 우측 정보 박스에서 기본 정보 (브랜드 / 재고 / 상태) 를 확인하세요.
         </p>
       )}
-    </div>
-  );
-}
-
-function ReviewsTab({ productId }) {
-  return (
-    <div style={S.placeholderBox}>
-      <h2 style={S.tabTitle}>구매평</h2>
-      <p style={S.placeholderText}>
-        C1-c 에서 별점 분포 차트와 리뷰 리스트가 여기로 이동합니다.<br />
-        현재는 페이지 하단의 별점 차트를 확인하세요.
-      </p>
-      <p style={S.placeholderMeta}>productId: {productId}</p>
     </div>
   );
 }
@@ -175,7 +152,7 @@ function QnATab({ productId }) {
       <h2 style={S.tabTitle}>Q&A</h2>
       <p style={S.placeholderText}>
         Q&A 기능 준비 중입니다.<br />
-        백엔드 B3 (QnA CRUD) 완성 후 활성화됩니다.
+        백엔드 B3 (QnA CRUD API) 완성 후 활성화됩니다.
       </p>
       <p style={S.placeholderMeta}>productId: {productId}</p>
     </div>
@@ -203,7 +180,6 @@ function RefundTab() {
           • <strong>고객센터</strong>: 1588-0000 (평일 09:00 ~ 18:00)
         </p>
       </div>
-      <p style={S.placeholderMeta}>※ C1-c 에서 정식 콘텐츠로 보강 예정</p>
     </div>
   );
 }
@@ -225,7 +201,7 @@ const S = {
     background: '#ffffff',
     borderTop: '1px solid #e4e4e7',
     borderBottom: '1px solid #e4e4e7',
-    margin: '0 -24px', // container padding 보정 (전체 너비 가로지름)
+    margin: '0 -24px',
     padding: '0 24px',
     boxShadow: '0 1px 0 rgba(0,0,0,0.02)',
   },

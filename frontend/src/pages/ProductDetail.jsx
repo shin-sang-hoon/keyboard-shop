@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import RatingDistributionChart from '../components/RatingDistributionChart';
 import ProductGallery from '../components/ProductGallery';
 import ProductTabs from '../components/ProductTabs';
 
@@ -326,11 +325,7 @@ export default function ProductDetail() {
               {wished ? '찜 완료' : '찜하기'}
             </button>
 
-            {/* 5-H C5: 별점 분포 차트 (B5 stats API 시각화)
-                C1-c 에서 '구매평' 탭 안으로 이동 예정 */}
-            <div style={{ marginTop: 8 }}>
-              <RatingDistributionChart productId={product.id} />
-            </div>
+            {/* 5-H C1-c: 별점 차트는 ReviewList (구매평 탭) 안으로 이동했음 */}
           </div>
         </div>
 
