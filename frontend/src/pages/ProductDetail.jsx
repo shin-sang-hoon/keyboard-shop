@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import RatingDistributionChart from '../components/RatingDistributionChart';
+import ProductGallery from '../components/ProductGallery';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
 
@@ -120,9 +121,6 @@ export default function ProductDetail() {
   // 찜 (개인의 구매 의사, 본인만 봄, 카운트 없음)
   const [wished, setWished] = useState(false);
 
-  // 이미지 로드 실패
-  const [imgError, setImgError] = useState(false);
-
   // 토스트
   const [toast, setToast] = useState({ message: '', visible: false });
 
@@ -132,7 +130,6 @@ export default function ProductDetail() {
     setLoading(true);
     setError(null);
     setProduct(null);
-    setImgError(false);
 
     fetch(`${API_BASE}/products/${id}`, { signal: controller.signal })
       .then((r) => {
@@ -207,7 +204,6 @@ export default function ProductDetail() {
   }
 
   // ─── 메인 렌더 ───────────────────────────────────────────────────────
-  const hasImage = product.imageUrl && !imgError;
   const hasGlb = Boolean(product.glbUrl);
 
   return (
@@ -219,22 +215,12 @@ export default function ProductDetail() {
         />
 
         <div style={S.layout}>
-          {/* ── 좌: 이미지 ───────────────────────────────────────── */}
+          {/* ── 좌: 갤러리 (5-H C1-a) ──────────────────────────── */}
           <div style={S.imageColumn}>
-            <div style={S.imageBox}>
-              {hasImage ? (
-                <img
-                  src={product.imageUrl}
-                  alt={product.name}
-                  onError={() => setImgError(true)}
-                  style={S.image}
-                />
-              ) : (
-                <div style={S.imagePlaceholder}>
-                  이미지가 준비되지 않았습니다
-                </div>
-              )}
-            </div>
+            <ProductGallery
+              images={product.images}
+              fallbackImageUrl={product.imageUrl}
+            />
           </div>
 
           {/* ── 우: 정보 / CTA ──────────────────────────────────── */}
@@ -340,7 +326,7 @@ export default function ProductDetail() {
             </button>
 
             {/* 5-H C5: 별점 분포 차트 (B5 stats API 시각화)
-                v3 ProductDetail 풀 재작성 시 '구매평' 탭 안으로 이동 예정 */}
+                v3 ProductDetail 풀 재작성 시 '구매평' 탭 안으로 이동 예정 (C1-c) */}
             <div style={{ marginTop: 8 }}>
               <RatingDistributionChart productId={product.id} />
             </div>
@@ -420,30 +406,10 @@ const S = {
     alignItems: 'start',
   },
 
-  // 좌: 이미지
+  // 좌: 갤러리 (C1-a 에서 ProductGallery 가 sticky 처리)
   imageColumn: {
     position: 'sticky',
     top: 24,
-  },
-  imageBox: {
-    width: '100%',
-    aspectRatio: '1 / 1',
-    background: '#fff',
-    border: '1px solid #e4e4e7',
-    borderRadius: 12,
-    overflow: 'hidden',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  image: {
-    width: '100%',
-    height: '100%',
-    objectFit: 'contain',
-  },
-  imagePlaceholder: {
-    color: '#a1a1aa',
-    fontSize: 14,
   },
 
   // 우: 정보
