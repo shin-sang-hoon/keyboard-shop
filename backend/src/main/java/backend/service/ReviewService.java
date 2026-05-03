@@ -1,6 +1,8 @@
 package backend.service;
 
+import backend.dto.PagedResponse;
 import backend.dto.ReviewDto;
+import backend.dto.ReviewStatsDto;
 import backend.entity.Order;
 import backend.entity.OrderItem;
 import backend.entity.Review;
@@ -16,8 +18,11 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+import java.util.Map;
+
 /**
- * 리뷰 도메인 서비스 (5-H A6 + B2).
+ * 리뷰 도메인 서비스 (5-H A6 + B2 + B5).
  *
  * A6 create() 검증 4단계:
  *   1) OrderItem 존재? → 404
@@ -31,12 +36,14 @@ import org.springframework.transaction.annotation.Transactional;
  *   - "구매 인증 리뷰" 도메인 룰을 DB 제약 + Service 검증 2중으로 인코딩
  *
  * rating 검증: 1.0 ~ 5.0, 0.5 단위 — rating * 2 가 정수여야 함
- *   (1.0 → 2.0, 1.5 → 3.0, ..., 5.0 → 10.0 모두 정수)
- *   2.7 → 5.4 (정수 아님) → 거부
  *
- * update() / delete() 도메인 메서드 패턴:
- *   - update: review.updateContent(...) → dirty checking 자동 UPDATE
- *   - delete: 본인 또는 ADMIN 만 가능
+ * B5 별점 분포:
+ *   - SQL FLOOR(rating) 으로 1~5 정수 버킷 정규화
+ *   - 빈 버킷도 0 으로 명시 응답 (프론트가 0% 막대 그릴 수 있도록)
+ *   - totalCount + averageRating 따로 집계 (분포 GROUP BY 와 결합 어려움)
+ *
+ * B2 PageImpl WARN 청산:
+ *   - getReviewsByProduct 반환 타입 Page → PagedResponse (4/27 ProductService 패턴 일관)
  */
 @Service
 @RequiredArgsConstructor
@@ -52,12 +59,52 @@ public class ReviewService {
     // 조회 (B2)
     // ─────────────────────────────────────────────────────
 
-    public Page<ReviewDto.Response> getReviewsByProduct(Long productId, Pageable pageable) {
+    /**
+     * 상품별 리뷰 페이지 — PagedResponse 직접 반환 (PageImpl WARN 회피).
+     */
+    public PagedResponse<ReviewDto.Response> getReviewsByProduct(Long productId, Pageable pageable) {
         if (!productRepository.existsById(productId)) {
             throw BusinessException.notFound("상품을 찾을 수 없습니다: " + productId);
         }
-        return reviewRepository.findByProductId(productId, pageable)
+        Page<ReviewDto.Response> page = reviewRepository.findByProductId(productId, pageable)
                 .map(ReviewDto.Response::from);
+        return PagedResponse.from(page);
+    }
+
+    // ─────────────────────────────────────────────────────
+    // 통계 (B5)
+    // ─────────────────────────────────────────────────────
+
+    /**
+     * 별점 분포 통계 — 2 쿼리 (count+avg, distribution).
+     *
+     * 분포 GROUP BY FLOOR 와 전체 평균/카운트는 SQL 1쿼리로 합치기 어려움
+     * (GROUP BY 적용된 row 별 AVG 가 되어버림). MySQL ROLLUP 으로 가능하지만
+     * 코드 복잡도 증가 → 명료성 위해 2 쿼리로 분리.
+     */
+    public ReviewStatsDto getReviewStats(Long productId) {
+        if (!productRepository.existsById(productId)) {
+            throw BusinessException.notFound("상품을 찾을 수 없습니다: " + productId);
+        }
+
+        // 1) 전체 카운트 + 평균
+        long totalCount = reviewRepository.countByProductId(productId);
+        Double averageRating = reviewRepository.findAverageRatingByProductId(productId);
+        // 평균은 소수점 1자리로 반올림 (4.34 → 4.3)
+        if (averageRating != null) {
+            averageRating = Math.round(averageRating * 10.0) / 10.0;
+        }
+
+        // 2) 별점 분포 (1~5 버킷)
+        List<Object[]> rawDistribution = reviewRepository.findRatingDistributionByProductId(productId);
+        Map<Integer, Long> distribution = ReviewStatsDto.normalizeDistribution(rawDistribution);
+
+        return ReviewStatsDto.builder()
+                .productId(productId)
+                .totalCount(totalCount)
+                .averageRating(averageRating)
+                .distribution(distribution)
+                .build();
     }
 
     // ─────────────────────────────────────────────────────

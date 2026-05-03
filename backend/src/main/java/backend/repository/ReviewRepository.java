@@ -11,18 +11,17 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Review 영속성 레포지토리 (5-H A2 + A6 통합 + B1 batch).
+ * Review 영속성 레포지토리 (5-H A2 + A6 통합 + B1 batch + B5 stats).
  *
- * 메서드 구성:
+ * 메서드 구성 (8개):
  *  - 조회: findByProductId(페이징), findByUserId(마이페이지)
  *  - 집계: countByProductId, findAverageRatingByProductId
  *  - 구매 인증: existsByOrderItemId(작성 전 사전 체크), findByOrderItemId(주문별 리뷰 조회)
  *  - B1 batch: findReviewStatsByProductIds (목록 페이지 N+1 회피용 IN 절 일괄 집계)
+ *  - B5 stats: findRatingDistributionByProductId (별점 분포 5버킷 GROUP BY FLOOR)
  *
  * UNIQUE(order_item_id) 위반은 DB 가 막지만, Service 에서 existsByOrderItemId 로 사전 검증해
  * 깔끔한 비즈니스 예외(ReviewAlreadyExistsException 등)로 변환하는 게 UX 상 좋음.
- *
- * B5 별점 분포 통계 쿼리 (1★~5★ count) 는 별도 추가 예정.
  */
 public interface ReviewRepository extends JpaRepository<Review, Long> {
 
@@ -54,4 +53,22 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
            "FROM Review r WHERE r.product.id IN :productIds " +
            "GROUP BY r.product.id")
     List<Object[]> findReviewStatsByProductIds(@Param("productIds") List<Long> productIds);
+
+    /**
+     * 5-H B5: 별점 분포 — FLOOR(rating) 으로 5버킷 정규화 후 GROUP BY.
+     *
+     * 0.5 단위 rating 을 정수 버킷으로 매핑 (한국 쇼핑몰 표준):
+     *   FLOOR(1.0) = 1, FLOOR(1.5) = 1
+     *   FLOOR(2.0) = 2, FLOOR(2.5) = 2
+     *   FLOOR(3.0) = 3, FLOOR(3.5) = 3
+     *   FLOOR(4.0) = 4, FLOOR(4.5) = 4
+     *   FLOOR(5.0) = 5
+     *
+     * @return Object[]: [bucket(Integer 1~5), count(Long)]
+     *         리뷰 0건 버킷은 row 없음 (Service 에서 1~5 키 보정)
+     */
+    @Query("SELECT FLOOR(r.rating), COUNT(r) " +
+           "FROM Review r WHERE r.product.id = :productId " +
+           "GROUP BY FLOOR(r.rating)")
+    List<Object[]> findRatingDistributionByProductId(@Param("productId") Long productId);
 }
