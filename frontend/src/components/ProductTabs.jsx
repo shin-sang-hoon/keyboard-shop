@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ReviewList from './ReviewList';
+import QnAList from './QnAList';
 
 /**
  * 상품 상세 4-tab 네비게이션 (5-H C1-b + C1-c).
@@ -27,7 +28,7 @@ const TABS = [
 
 const VALID_KEYS = new Set(TABS.map((t) => t.key));
 
-export default function ProductTabs({ product, productId }) {
+export default function ProductTabs({ product, productId, onRequestQnAWrite, qnaRefetchKey = 0 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabsRef = useRef(null);
 
@@ -118,7 +119,13 @@ export default function ProductTabs({ product, productId }) {
       >
         {activeTab === 'detail'  && <DetailTab product={product} />}
         {activeTab === 'reviews' && <ReviewList productId={productId} />}
-        {activeTab === 'qna'     && <QnATab productId={productId} />}
+        {activeTab === 'qna'     && (
+          <QnAList
+            productId={productId}
+            onRequestWrite={onRequestQnAWrite}
+            refetchKey={qnaRefetchKey}
+          />
+        )}
         {activeTab === 'refund'  && <RefundTab />}
       </div>
     </div>
@@ -147,12 +154,13 @@ function DetailTab({ product }) {
 }
 
 function QnATab({ productId }) {
+  // 5-H C3 완료: ProductTabs 에서 직접 <QnAList /> 를 렌더하므로 이 컴포넌트는 더 이상 사용 안 됨.
+  // 호환성을 위해 남겨두지만, 향후 정리 시 삭제 가능.
   return (
     <div style={S.placeholderBox}>
       <h2 style={S.tabTitle}>Q&A</h2>
       <p style={S.placeholderText}>
-        Q&A 기능 준비 중입니다.<br />
-        백엔드 B3 (QnA CRUD API) 완성 후 활성화됩니다.
+        (deprecated placeholder — QnAList 가 직접 렌더링됩니다)
       </p>
       <p style={S.placeholderMeta}>productId: {productId}</p>
     </div>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import ProductGallery from '../components/ProductGallery';
 import ProductTabs from '../components/ProductTabs';
+import QnAFormModal from '../components/QnAFormModal';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
 
@@ -135,6 +136,13 @@ export default function ProductDetail() {
   // ─── Wishlist 상태 ────────────────────────────────────────
   const [wished, setWished] = useState(false);
   const [wishBusy, setWishBusy] = useState(false);
+
+  // ─── QnA 모달 상태 (5-H C3) ──────────────────────────────
+  // qnaModalOpen: 작성 모달 열림 여부
+  // qnaRefetchKey: 등록 성공 시 +1 → QnAList 의 useEffect([refetchKey]) 트리거
+  //   Redux/Context 없이 부모 → 자식 단방향 refresh 신호 전달하는 가벼운 패턴.
+  const [qnaModalOpen, setQnaModalOpen] = useState(false);
+  const [qnaRefetchKey, setQnaRefetchKey] = useState(0);
 
   // ─── 토스트 ──────────────────────────────────────────────
   const [toast, setToast] = useState({ message: '', visible: false });
@@ -296,6 +304,23 @@ export default function ProductDetail() {
     window.open(`/builder/${id}`, '_blank', 'width=1400,height=900');
   }
 
+  // ─── Q&A 질문하기 (5-H C3) ────────────────────────────────
+  // 비로그인 가드는 C6 패턴 그대로 — 토스트 + return.
+  function handleRequestQnAWrite() {
+    if (!isLoggedIn()) {
+      showToast('로그인이 필요합니다');
+      return;
+    }
+    setQnaModalOpen(true);
+  }
+
+  // 모달 등록 성공 콜백 — 모달 닫고 리스트 refetch 트리거 + 토스트.
+  function handleQnaSuccess() {
+    setQnaModalOpen(false);
+    setQnaRefetchKey((k) => k + 1);
+    showToast('질문이 등록되었습니다');
+  }
+
   // ─── 로딩 / 에러 ──────────────────────────────────────────
   if (loading) {
     return (
@@ -453,9 +478,23 @@ export default function ProductDetail() {
           </div>
         </div>
 
-        {/* 5-H C1-b: 4-tab nav (sticky) */}
-        <ProductTabs product={product} productId={product.id} />
+        {/* 5-H C1-b + C3: 4-tab nav (sticky) + Q&A 모달 트리거 */}
+        <ProductTabs
+          product={product}
+          productId={product.id}
+          onRequestQnAWrite={handleRequestQnAWrite}
+          qnaRefetchKey={qnaRefetchKey}
+        />
       </div>
+
+      {/* 5-H C3: Q&A 작성 모달 (열렸을 때만 마운트 — 초기 렌더 비용 0) */}
+      {qnaModalOpen && (
+        <QnAFormModal
+          productId={product.id}
+          onClose={() => setQnaModalOpen(false)}
+          onSuccess={handleQnaSuccess}
+        />
+      )}
 
       <Toast message={toast.message} visible={toast.visible} />
     </div>
