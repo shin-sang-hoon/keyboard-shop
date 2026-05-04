@@ -5,13 +5,13 @@ import ProductTabs from '../components/ProductTabs';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
 
-// ─── 한글 라벨 매핑 ────────────────────────────────────────────────────────
+// ─── 표시 라벨 매핑 ────────────────────────────────────────────────
 const PRODUCT_TYPE_LABELS = {
   KEYBOARD: '키보드',
   MOUSE: '마우스',
   SWITCH_PART: '스위치 부품',
   ACCESSORY: '액세서리',
-  NOISE: '소음',
+  NOISE: '노이즈',
   UNCLASSIFIED: null,
 };
 
@@ -32,7 +32,17 @@ const LAYOUT_LABELS = {
   '40': '40%',
 };
 
-// ─── 빵부스러기 ────────────────────────────────────────────────────────────
+// ─── 인증 헬퍼 (5-A 미완 - 임시 localStorage 기반) ──────────────────
+// 5-A authStore 완성 시 마이그레이션. 현재는 단순 토큰 존재 여부로 판단.
+function getAuthToken() {
+  return localStorage.getItem('accessToken');
+}
+
+function isLoggedIn() {
+  return Boolean(getAuthToken());
+}
+
+// ─── 빵부스러기 ────────────────────────────────────────────────────
 function Breadcrumb({ productType, productName }) {
   const typeLabel = productType ? PRODUCT_TYPE_LABELS[productType] : null;
 
@@ -60,7 +70,7 @@ function Breadcrumb({ productType, productName }) {
   );
 }
 
-// ─── 스펙 칩 ───────────────────────────────────────────────────────────────
+// ─── 스펙 칩 ─────────────────────────────────────────────────────
 function SpecChips({ product }) {
   const chips = [];
 
@@ -92,7 +102,7 @@ function SpecChips({ product }) {
   );
 }
 
-// ─── 토스트 ────────────────────────────────────────────────────────────────
+// ─── 토스트 ──────────────────────────────────────────────────────
 function Toast({ message, visible }) {
   if (!message) return null;
   return (
@@ -106,7 +116,7 @@ function Toast({ message, visible }) {
   );
 }
 
-// ─── 메인 ProductDetail ────────────────────────────────────────────────────
+// ─── 메인 ProductDetail ──────────────────────────────────────────
 export default function ProductDetail() {
   const { id } = useParams();
 
@@ -114,17 +124,22 @@ export default function ProductDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // 좋아요 (인기도, 모든 사용자가 누를 수 있음, 카운트 표시)
+  // ─── Like 상태 ────────────────────────────────────────────
+  // liked: 본인이 좋아요 눌렀는지 (로그인 시에만 의미 있음)
+  // likeCount: 전체 좋아요 수 (비로그인도 표시)
+  // 로딩 분리: count 만 먼저 fetch, liked 는 토글 시점에 알 수 있음
   const [liked, setLiked] = useState(false);
-  const likeCount = 0; // 백엔드 연결 전 더미
+  const [likeCount, setLikeCount] = useState(0);
+  const [likeBusy, setLikeBusy] = useState(false); // 토글 중 중복 클릭 방지
 
-  // 찜 (개인의 구매 의사, 본인만 봄, 카운트 없음)
+  // ─── Wishlist 상태 ────────────────────────────────────────
   const [wished, setWished] = useState(false);
+  const [wishBusy, setWishBusy] = useState(false);
 
-  // 토스트
+  // ─── 토스트 ──────────────────────────────────────────────
   const [toast, setToast] = useState({ message: '', visible: false });
 
-  // ─── API 호출 ────────────────────────────────────────────────────────
+  // ─── 상품 데이터 fetch ────────────────────────────────────
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
@@ -148,14 +163,127 @@ export default function ProductDetail() {
     return () => controller.abort();
   }, [id]);
 
-  // ─── 토스트 표시 ─────────────────────────────────────────────────────
+  // ─── 좋아요 카운트 fetch (비로그인도 가능) ────────────────────
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`${API_BASE}/products/${id}/like/count`, { signal: controller.signal })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => setLikeCount(data.count ?? 0))
+      .catch((err) => {
+        if (err.name === 'AbortError') return;
+        // 카운트 fetch 실패는 silent (UI 0 으로 폴백, 사용자에게 토스트 안 띄움)
+        console.warn('Like count fetch failed:', err.message);
+      });
+    return () => controller.abort();
+  }, [id]);
+
+  // 주의: 로그인 사용자의 liked/wished 초기 상태는 별도 API 가 없어서
+  // 토글 시점에 서버 응답으로 동기화. 페이지 이탈 후 재진입 시 기존 상태가
+  // 보이지 않는 한계 — B1 ProductDto 에 isLikedByMe 추가하면 해결 가능.
+
+  // ─── 토스트 표시 ──────────────────────────────────────────
   function showToast(message) {
     setToast({ message, visible: true });
     setTimeout(() => setToast((t) => ({ ...t, visible: false })), 1800);
     setTimeout(() => setToast({ message: '', visible: false }), 2200);
   }
 
-  // ─── 핸들러 ──────────────────────────────────────────────────────────
+  // ─── 좋아요 토글 (낙관적 업데이트 + 401 롤백) ───────────────
+  async function handleToggleLike() {
+    if (!isLoggedIn()) {
+      showToast('로그인이 필요합니다');
+      return;
+    }
+    if (likeBusy) return;
+
+    // 1) 낙관적 업데이트 — UI 즉시 반영
+    const prevLiked = liked;
+    const prevCount = likeCount;
+    const nextLiked = !prevLiked;
+    setLiked(nextLiked);
+    setLikeCount(prevCount + (nextLiked ? 1 : -1));
+    setLikeBusy(true);
+
+    try {
+      const res = await fetch(`${API_BASE}/products/${id}/like`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${getAuthToken()}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          throw new Error('AUTH');
+        }
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      // 2) 서버 응답으로 정확한 상태 동기화
+      const data = await res.json();
+      setLiked(data.liked);
+      setLikeCount(data.count);
+    } catch (err) {
+      // 3) 롤백
+      setLiked(prevLiked);
+      setLikeCount(prevCount);
+
+      if (err.message === 'AUTH') {
+        showToast('로그인이 만료되었습니다');
+      } else {
+        showToast('잠시 후 다시 시도해주세요');
+      }
+    } finally {
+      setLikeBusy(false);
+    }
+  }
+
+  // ─── 찜 토글 (낙관적 업데이트 + 401 롤백) ───────────────────
+  async function handleToggleWish() {
+    if (!isLoggedIn()) {
+      showToast('로그인이 필요합니다');
+      return;
+    }
+    if (wishBusy) return;
+
+    const prevWished = wished;
+    setWished(!prevWished);
+    setWishBusy(true);
+
+    try {
+      const res = await fetch(`${API_BASE}/products/${id}/wishlist`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${getAuthToken()}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) throw new Error('AUTH');
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      setWished(data.wishlisted);
+      showToast(data.wishlisted ? '찜 목록에 추가됨' : '찜 해제됨');
+    } catch (err) {
+      setWished(prevWished);
+      if (err.message === 'AUTH') {
+        showToast('로그인이 만료되었습니다');
+      } else {
+        showToast('잠시 후 다시 시도해주세요');
+      }
+    } finally {
+      setWishBusy(false);
+    }
+  }
+
+  // ─── 핸들러: 구매/장바구니 (placeholder) ──────────────────
   function handleBuy() {
     showToast('구매 페이지 준비 중입니다');
   }
@@ -164,21 +292,11 @@ export default function ProductDetail() {
     showToast('장바구니에 담겼습니다 (준비 중)');
   }
 
-  function handleToggleLike() {
-    setLiked((v) => !v);
-    showToast(liked ? '좋아요 취소' : '좋아요');
-  }
-
-  function handleToggleWish() {
-    setWished((v) => !v);
-    showToast(wished ? '찜 해제' : '찜 목록에 추가');
-  }
-
   function handle3DPreview() {
     window.open(`/builder/${id}`, '_blank', 'width=1400,height=900');
   }
 
-  // ─── 로딩 / 에러 ─────────────────────────────────────────────────────
+  // ─── 로딩 / 에러 ──────────────────────────────────────────
   if (loading) {
     return (
       <div style={S.page}>
@@ -203,7 +321,7 @@ export default function ProductDetail() {
     );
   }
 
-  // ─── 메인 렌더 ───────────────────────────────────────────────────────
+  // ─── 메인 렌더 ────────────────────────────────────────────
   const hasGlb = Boolean(product.glbUrl);
 
   return (
@@ -215,7 +333,7 @@ export default function ProductDetail() {
         />
 
         <div style={S.layout}>
-          {/* ── 좌: 갤러리 (5-H C1-a) ──────────────────────────── */}
+          {/* 좌측 갤러리 (5-H C1-a) */}
           <div style={S.imageColumn}>
             <ProductGallery
               images={product.images}
@@ -223,19 +341,23 @@ export default function ProductDetail() {
             />
           </div>
 
-          {/* ── 우: 정보 / CTA ──────────────────────────────────── */}
+          {/* 우측 정보 / CTA */}
           <div style={S.infoColumn}>
             {/* 상품명 + ♥ 좋아요 (인기도) */}
             <div style={S.titleRow}>
               <h1 style={S.title}>{product.name}</h1>
               <button
                 onClick={handleToggleLike}
+                disabled={likeBusy}
                 style={{
                   ...S.likeTopBtn,
                   borderColor: liked ? '#fecaca' : '#e4e4e7',
                   background: liked ? '#fef2f2' : 'transparent',
+                  cursor: likeBusy ? 'wait' : 'pointer',
+                  opacity: likeBusy ? 0.7 : 1,
                 }}
-                aria-label="좋아요"
+                aria-label={liked ? '좋아요 취소' : '좋아요'}
+                aria-pressed={liked}
                 title="이 상품 좋아요"
               >
                 <span style={{
@@ -307,11 +429,15 @@ export default function ProductDetail() {
             {/* ⭐ 찜 (보조) */}
             <button
               onClick={handleToggleWish}
+              disabled={wishBusy}
+              aria-pressed={wished}
               style={{
                 ...S.wishBtn,
                 borderColor: wished ? '#fed7aa' : '#e4e4e7',
                 background: wished ? '#fff7ed' : '#fff',
                 color: wished ? '#c2410c' : '#52525b',
+                cursor: wishBusy ? 'wait' : 'pointer',
+                opacity: wishBusy ? 0.7 : 1,
               }}
             >
               <span style={{
@@ -324,12 +450,10 @@ export default function ProductDetail() {
               </span>
               {wished ? '찜 완료' : '찜하기'}
             </button>
-
-            {/* 5-H C1-c: 별점 차트는 ReviewList (구매평 탭) 안으로 이동했음 */}
           </div>
         </div>
 
-        {/* ─── 5-H C1-b: 4-tab nav (sticky) ─────────────────────── */}
+        {/* 5-H C1-b: 4-tab nav (sticky) */}
         <ProductTabs product={product} productId={product.id} />
       </div>
 
@@ -338,7 +462,7 @@ export default function ProductDetail() {
   );
 }
 
-// ─── 스타일 ────────────────────────────────────────────────────────────────
+// ─── 스타일 ────────────────────────────────────────────────────
 const S = {
   page: {
     fontFamily: "'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif",
@@ -369,7 +493,6 @@ const S = {
     fontWeight: 500,
   },
 
-  // 빵부스러기
   breadcrumb: {
     display: 'flex',
     alignItems: 'center',
@@ -397,21 +520,16 @@ const S = {
     minWidth: 0,
   },
 
-  // 메인 레이아웃
   layout: {
     display: 'grid',
     gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr)',
     gap: 48,
     alignItems: 'start',
   },
-
-  // 좌: 갤러리 (C1-a 에서 ProductGallery 가 sticky 처리)
   imageColumn: {
     position: 'sticky',
     top: 24,
   },
-
-  // 우: 정보
   infoColumn: {
     display: 'flex',
     flexDirection: 'column',
@@ -432,7 +550,6 @@ const S = {
     flex: 1,
   },
 
-  // 우상단 ♥ 좋아요
   likeTopBtn: {
     border: '1px solid #e4e4e7',
     borderRadius: 8,
@@ -449,7 +566,6 @@ const S = {
     fontWeight: 500,
   },
 
-  // 가격
   price: {
     fontSize: 28,
     fontWeight: 700,
@@ -457,7 +573,6 @@ const S = {
     margin: '4px 0',
   },
 
-  // 칩
   chipRow: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -473,7 +588,6 @@ const S = {
     borderRadius: 12,
   },
 
-  // 메타 박스
   metaBox: {
     background: '#fff',
     border: '1px solid #e4e4e7',
@@ -496,7 +610,6 @@ const S = {
     fontWeight: 500,
   },
 
-  // 3D 미리보기
   previewBtn: {
     width: '100%',
     padding: '12px 16px',
@@ -513,7 +626,6 @@ const S = {
     justifyContent: 'center',
   },
 
-  // CTA
   ctaRow: {
     display: 'grid',
     gridTemplateColumns: '1fr 1fr',
@@ -545,7 +657,6 @@ const S = {
     justifyContent: 'center',
   },
 
-  // 하단 ⭐ 찜
   wishBtn: {
     width: '100%',
     padding: '12px',
@@ -560,7 +671,6 @@ const S = {
     justifyContent: 'center',
   },
 
-  // 토스트
   toast: {
     position: 'fixed',
     bottom: 40,
