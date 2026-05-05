@@ -2,6 +2,7 @@ package backend.service;
 
 import backend.dto.PagedResponse;
 import backend.dto.ReviewDto;
+import backend.dto.ReviewSort;
 import backend.entity.Order;
 import backend.entity.OrderItem;
 import backend.entity.Product;
@@ -25,14 +26,17 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -404,7 +408,7 @@ class ReviewServiceTest {
             Page<Review> page = new PageImpl<>(List.of(r), pageable, 1);
 
             given(productRepository.existsById(10L)).willReturn(true);
-            given(reviewRepository.findByProductId(10L, pageable)).willReturn(page);
+            given(reviewRepository.findByProductId(eq(10L), any(Pageable.class))).willReturn(page);
 
             PagedResponse<ReviewDto.Response> resp = reviewService.getReviewsByProduct(10L, pageable);
 
@@ -445,6 +449,81 @@ class ReviewServiceTest {
                     .containsEntry(4, 1L)
                     .containsEntry(5, 2L);
             assertThat(stats.getDistribution()).hasSize(5);
+        }
+    }
+
+    // ═════════════════════════════════════════════════════
+    // B6 정렬 — ReviewSort enum 검증
+    // ═════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("B6 정렬 — ReviewSort enum 으로 Pageable.sort 덮어쓰기")
+    class SortTest {
+
+        @Test
+        @DisplayName("LATEST — createdAt DESC 단일 필드")
+        void sort_latest() {
+            // given — 기본 Pageable (sort 무관, enum 이 덮어씀)
+            Pageable raw = PageRequest.of(0, 10);
+            Page<Review> emptyPage = new PageImpl<>(Collections.emptyList(), raw, 0);
+
+            given(productRepository.existsById(10L)).willReturn(true);
+            given(reviewRepository.findByProductId(eq(10L), any(Pageable.class)))
+                    .willReturn(emptyPage);
+
+            // when
+            reviewService.getReviewsByProduct(10L, raw, ReviewSort.LATEST);
+
+            // then — Repository 가 받은 Pageable 의 Sort 검증
+            ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+            verify(reviewRepository).findByProductId(eq(10L), captor.capture());
+            Sort capturedSort = captor.getValue().getSort();
+
+            // createdAt DESC 한 줄
+            assertThat(capturedSort).isEqualTo(Sort.by(Sort.Direction.DESC, "createdAt"));
+        }
+
+        @Test
+        @DisplayName("RATING_DESC — rating DESC + createdAt DESC tiebreaker")
+        void sort_ratingDesc_withTiebreaker() {
+            Pageable raw = PageRequest.of(0, 10);
+            Page<Review> emptyPage = new PageImpl<>(Collections.emptyList(), raw, 0);
+
+            given(productRepository.existsById(10L)).willReturn(true);
+            given(reviewRepository.findByProductId(eq(10L), any(Pageable.class)))
+                    .willReturn(emptyPage);
+
+            reviewService.getReviewsByProduct(10L, raw, ReviewSort.RATING_DESC);
+
+            ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+            verify(reviewRepository).findByProductId(eq(10L), captor.capture());
+            Sort capturedSort = captor.getValue().getSort();
+
+            // rating DESC, createdAt DESC 두 줄 — 동일 별점 내 최신순 보장
+            Sort expected = Sort.by(Sort.Direction.DESC, "rating")
+                    .and(Sort.by(Sort.Direction.DESC, "createdAt"));
+            assertThat(capturedSort).isEqualTo(expected);
+        }
+
+        @Test
+        @DisplayName("RATING_ASC — rating ASC + createdAt DESC tiebreaker")
+        void sort_ratingAsc_withTiebreaker() {
+            Pageable raw = PageRequest.of(0, 10);
+            Page<Review> emptyPage = new PageImpl<>(Collections.emptyList(), raw, 0);
+
+            given(productRepository.existsById(10L)).willReturn(true);
+            given(reviewRepository.findByProductId(eq(10L), any(Pageable.class)))
+                    .willReturn(emptyPage);
+
+            reviewService.getReviewsByProduct(10L, raw, ReviewSort.RATING_ASC);
+
+            ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+            verify(reviewRepository).findByProductId(eq(10L), captor.capture());
+            Sort capturedSort = captor.getValue().getSort();
+
+            Sort expected = Sort.by(Sort.Direction.ASC, "rating")
+                    .and(Sort.by(Sort.Direction.DESC, "createdAt"));
+            assertThat(capturedSort).isEqualTo(expected);
         }
     }
 }

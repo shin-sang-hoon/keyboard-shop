@@ -2,6 +2,7 @@ package backend.service;
 
 import backend.dto.PagedResponse;
 import backend.dto.ReviewDto;
+import backend.dto.ReviewSort;
 import backend.dto.ReviewStatsDto;
 import backend.entity.Order;
 import backend.entity.OrderItem;
@@ -14,6 +15,7 @@ import backend.repository.ReviewRepository;
 import backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,7 +24,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 리뷰 도메인 서비스 (5-H A6 + B2 + B5).
+ * 리뷰 도메인 서비스 (5-H A6 + B2 + B5 + B6).
  *
  * A6 create() 검증 4단계:
  *   1) OrderItem 존재? → 404
@@ -44,6 +46,11 @@ import java.util.Map;
  *
  * B2 PageImpl WARN 청산:
  *   - getReviewsByProduct 반환 타입 Page → PagedResponse (4/27 ProductService 패턴 일관)
+ *
+ * B6 정렬 enum:
+ *   - getReviewsByProduct(productId, pageable, ReviewSort) 오버로드 추가
+ *   - 기존 호출처는 LATEST 위임 (backward compatible)
+ *   - Pageable 의 sort 는 무시하고 enum.toSort() 로 덮어씀 (enum 이 단일 진실 소스)
  */
 @Service
 @RequiredArgsConstructor
@@ -56,17 +63,43 @@ public class ReviewService {
     private final UserRepository userRepository;
 
     // ─────────────────────────────────────────────────────
-    // 조회 (B2)
+    // 조회 (B2 + B6)
     // ─────────────────────────────────────────────────────
 
     /**
-     * 상품별 리뷰 페이지 — PagedResponse 직접 반환 (PageImpl WARN 회피).
+     * 상품별 리뷰 페이지 — 기본 (LATEST).
+     *
+     * 5-H B6 이전 호출처와의 호환을 위해 유지. 신규 호출은 sort 파라미터 명시 권장.
      */
     public PagedResponse<ReviewDto.Response> getReviewsByProduct(Long productId, Pageable pageable) {
+        return getReviewsByProduct(productId, pageable, ReviewSort.LATEST);
+    }
+
+    /**
+     * 상품별 리뷰 페이지 — 정렬 enum 명시 (5-H B6).
+     *
+     * Pageable 의 sort 는 무시하고 ReviewSort.toSort() 로 덮어씀.
+     * 이유: Controller 가 @PageableDefault 로 createdAt DESC 를 넘겨도
+     * 도메인 enum 의 sort 가 우선권. enum 이 단일 진실 소스.
+     *
+     * @param sort  ReviewSort enum (LATEST/RATING_DESC/RATING_ASC)
+     */
+    public PagedResponse<ReviewDto.Response> getReviewsByProduct(
+            Long productId, Pageable pageable, ReviewSort sort) {
+
         if (!productRepository.existsById(productId)) {
             throw BusinessException.notFound("상품을 찾을 수 없습니다: " + productId);
         }
-        Page<ReviewDto.Response> page = reviewRepository.findByProductId(productId, pageable)
+
+        // Pageable 재구성 — page/size 는 유지, sort 만 enum 으로 교체
+        Pageable sortedPageable = PageRequest.of(
+                pageable.getPageNumber(),
+                pageable.getPageSize(),
+                sort.toSort()
+        );
+
+        Page<ReviewDto.Response> page = reviewRepository
+                .findByProductId(productId, sortedPageable)
                 .map(ReviewDto.Response::from);
         return PagedResponse.from(page);
     }

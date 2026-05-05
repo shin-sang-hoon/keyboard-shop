@@ -2,6 +2,7 @@ package backend.controller;
 
 import backend.dto.PagedResponse;
 import backend.dto.ReviewDto;
+import backend.dto.ReviewSort;
 import backend.dto.ReviewStatsDto;
 import backend.service.ReviewService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -15,7 +16,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * 리뷰 컨트롤러 (5-H B2 + B5).
+ * 리뷰 컨트롤러 (5-H B2 + B5 + B6).
  *
  * 라우트 구조:
  *   - GET    /api/products/{id}/reviews         : 상품별 리뷰 목록 (공개, PagedResponse)
@@ -29,6 +30,11 @@ import org.springframework.web.bind.annotation.*;
  *   - /api/reviews/**     → authenticated
  *
  * 5/3 변경: getProductReviews 반환 타입 Page → PagedResponse (PageImpl 직렬화 WARN 청산).
+ *
+ * B6 변경: getProductReviews 에 @RequestParam orderBy=ReviewSort 추가.
+ *   - 도메인 enum 으로 정렬 옵션 노출 (DB 컬럼명 디커플링)
+ *   - 잘못된 enum 값 → 자동 400 (GlobalExceptionHandler 의 enum 변환 실패 처리)
+ *   - 파라미터명 sort 가 아닌 orderBy: Spring Pageable resolver 와 충돌 회피
  */
 @RestController
 @RequiredArgsConstructor
@@ -37,14 +43,29 @@ public class ReviewController {
 
     private final ReviewService reviewService;
 
-    /** 상품별 리뷰 목록 (공개) — PagedResponse 로 직렬화 안전성 보장 */
+    /**
+     * 상품별 리뷰 목록 (공개) — orderBy enum 으로 정렬 옵션 노출 (B6).
+     *
+     * 사용 예:
+     *   GET /api/products/1/reviews                           → LATEST (기본)
+     *   GET /api/products/1/reviews?orderBy=RATING_DESC       → 별점 높은순
+     *   GET /api/products/1/reviews?orderBy=RATING_ASC&page=0 → 별점 낮은순
+     *   GET /api/products/1/reviews?orderBy=INVALID           → 400 (enum 변환 실패)
+     *
+     * 파라미터명 sort 가 아닌 orderBy 인 이유:
+     *   Spring Pageable resolver 가 ?sort=... 를 자동으로 Pageable 에 매핑 시도.
+     *   enum 값 "RATING_DESC" 가 컬럼명이 아니라 충돌. 별도 이름으로 회피.
+     *
+     * @PageableDefault 의 sort 는 fallback 용으로 유지 (Service 에서 enum 으로 덮어씀).
+     */
     @GetMapping("/api/products/{productId}/reviews")
-    @Operation(summary = "상품별 리뷰 목록 (페이징, 최신순)")
+    @Operation(summary = "상품별 리뷰 목록 (페이징 + 정렬 enum)")
     public ResponseEntity<PagedResponse<ReviewDto.Response>> getProductReviews(
             @PathVariable Long productId,
             @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC)
-            Pageable pageable) {
-        return ResponseEntity.ok(reviewService.getReviewsByProduct(productId, pageable));
+            Pageable pageable,
+            @RequestParam(name = "orderBy", defaultValue = "LATEST") ReviewSort orderBy) {
+        return ResponseEntity.ok(reviewService.getReviewsByProduct(productId, pageable, orderBy));
     }
 
     /**

@@ -4,7 +4,7 @@ import RatingDistributionChart from './RatingDistributionChart';
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
 
 /**
- * 상품 리뷰 리스트 (5-H C1-c + C2).
+ * 상품 리뷰 리스트 (5-H C1-c + C2 + B6).
  *
  * C2 변경:
  *   - props 에 onRequestWrite, refetchKey 추가 (C3 패턴 그대로)
@@ -12,15 +12,22 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api
  *   - EmptyState 에도 작성 버튼
  *   - refetchKey 변경 시 자동 refetch (등록 성공 후 트리거용)
  *
+ * B6 변경:
+ *   - sort dropdown 활성화 (disabled 제거)
+ *   - state value 를 백엔드 ReviewSort enum 값과 매칭 (LATEST/RATING_DESC/RATING_ASC)
+ *   - sort 변경 시 첫 페이지 reset + 자동 refetch
+ *   - fetch URL 에 ?orderBy=${sort} 추가
+ *   - 도움순(helpful) 만 disabled 유지 (도움 카운트 컬럼 부재)
+ *
  * 구성 (위 → 아래):
- *   [1] 헤더 — 정렬 dropdown (B6 미완성 → placeholder + disabled) + 작성 버튼
+ *   [1] 헤더 — 정렬 dropdown (B6 활성화) + 작성 버튼
  *   [2] 별점 분포 차트 (RatingDistributionChart, B5 stats API)
- *   [3] 리뷰 리스트 (B2 GET /api/products/{id}/reviews)
+ *   [3] 리뷰 리스트 (B2 GET /api/products/{id}/reviews?orderBy=...)
  *
  * Props:
  *   - productId: number
- *   - onRequestWrite: () => void  (C2 신규, 작성 버튼 클릭)
- *   - refetchKey: number          (C2 신규, 등록 성공 시 +1 → refetch 트리거)
+ *   - onRequestWrite: () => void  (C2)
+ *   - refetchKey: number          (C2)
  */
 export default function ReviewList({ productId, onRequestWrite, refetchKey = 0 }) {
   const [reviews, setReviews] = useState([]);
@@ -30,7 +37,8 @@ export default function ReviewList({ productId, onRequestWrite, refetchKey = 0 }
   const [totalElements, setTotalElements] = useState(0);
   const [isLast, setIsLast] = useState(true);
 
-  const [sort, setSort] = useState('latest');
+  // B6: 백엔드 ReviewSort enum 값과 매칭 (helpful 은 보류 — disabled)
+  const [sort, setSort] = useState('LATEST');
 
   const isMountedRef = useRef(true);
 
@@ -46,6 +54,12 @@ export default function ReviewList({ productId, onRequestWrite, refetchKey = 0 }
     if (refetchKey > 0) setPage(0);
   }, [refetchKey]);
 
+  // B6: sort 변경 → 첫 페이지로 reset (refetch 는 useEffect 가 자동)
+  const handleSortChange = (newSort) => {
+    setSort(newSort);
+    setPage(0);
+  };
+
   useEffect(() => {
     if (!productId) return;
 
@@ -54,7 +68,7 @@ export default function ReviewList({ productId, onRequestWrite, refetchKey = 0 }
     setError(null);
 
     fetch(
-      `${API_BASE}/products/${productId}/reviews?page=${page}&size=10`,
+      `${API_BASE}/products/${productId}/reviews?page=${page}&size=10&orderBy=${sort}`,
       { signal: controller.signal }
     )
       .then((res) => {
@@ -77,11 +91,11 @@ export default function ReviewList({ productId, onRequestWrite, refetchKey = 0 }
       });
 
     return () => controller.abort();
-  }, [productId, page, refetchKey]);
+  }, [productId, page, sort, refetchKey]);
 
   return (
     <div style={S.container}>
-      {/* ═══════ [1] 헤더 — 정렬 dropdown placeholder + 작성 버튼 ═══════ */}
+      {/* ═══════ [1] 헤더 — 정렬 dropdown + 작성 버튼 ═══════ */}
       <div style={S.header}>
         <div style={S.headerLeft}>
           <h2 style={S.title}>구매평</h2>
@@ -93,25 +107,24 @@ export default function ReviewList({ productId, onRequestWrite, refetchKey = 0 }
         </div>
 
         <div style={S.headerRight}>
-          {/* 정렬 dropdown — B6 완성 전이라 disabled placeholder */}
+          {/* B6: 정렬 dropdown 활성화 (helpful 만 disabled 유지) */}
           <div style={S.sortGroup}>
             <label style={S.sortLabel} htmlFor="review-sort">정렬</label>
             <select
               id="review-sort"
               value={sort}
-              onChange={(e) => setSort(e.target.value)}
-              disabled
-              style={S.sortSelect}
-              title="정렬 기능은 백엔드 B6 완성 후 활성화됩니다"
+              onChange={(e) => handleSortChange(e.target.value)}
+              style={S.sortSelectActive}
+              aria-label="리뷰 정렬"
             >
-              <option value="latest">최신순</option>
-              <option value="rating_desc">별점 높은순</option>
-              <option value="rating_asc">별점 낮은순</option>
-              <option value="helpful">도움순</option>
+              <option value="LATEST">최신순</option>
+              <option value="RATING_DESC">별점 높은순</option>
+              <option value="RATING_ASC">별점 낮은순</option>
+              <option value="helpful" disabled>도움순 (준비 중)</option>
             </select>
           </div>
 
-          {/* C2 신규: 리뷰 작성 버튼 */}
+          {/* C2: 리뷰 작성 버튼 */}
           {onRequestWrite && (
             <button
               type="button"
@@ -331,14 +344,15 @@ const S = {
     color: '#71717a',
     fontWeight: 500,
   },
-  sortSelect: {
+  // B6: 활성 dropdown 스타일 (기존 disabled placeholder 와 차이)
+  sortSelectActive: {
     padding: '6px 28px 6px 10px',
     fontSize: 13,
-    color: '#71717a',
-    background: '#f9fafb',
-    border: '1px solid #e4e4e7',
+    color: '#18181b',
+    background: '#fff',
+    border: '1px solid #d4d4d8',
     borderRadius: 6,
-    cursor: 'not-allowed',
+    cursor: 'pointer',
     fontFamily: 'inherit',
     appearance: 'menulist',
   },
