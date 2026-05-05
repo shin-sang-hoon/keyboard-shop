@@ -4,37 +4,25 @@ import RatingDistributionChart from './RatingDistributionChart';
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
 
 /**
- * 상품 리뷰 리스트 (5-H C1-c).
+ * 상품 리뷰 리스트 (5-H C1-c + C2).
+ *
+ * C2 변경:
+ *   - props 에 onRequestWrite, refetchKey 추가 (C3 패턴 그대로)
+ *   - 헤더 우측에 "+ 리뷰 작성" 버튼
+ *   - EmptyState 에도 작성 버튼
+ *   - refetchKey 변경 시 자동 refetch (등록 성공 후 트리거용)
  *
  * 구성 (위 → 아래):
- *   [1] 헤더 — 정렬 dropdown (B6 미완성 → placeholder + disabled)
+ *   [1] 헤더 — 정렬 dropdown (B6 미완성 → placeholder + disabled) + 작성 버튼
  *   [2] 별점 분포 차트 (RatingDistributionChart, B5 stats API)
  *   [3] 리뷰 리스트 (B2 GET /api/products/{id}/reviews)
  *
  * Props:
  *   - productId: number
- *
- * Lazy 패턴:
- *   ProductTabs 의 조건부 렌더 ({activeTab === 'reviews' && <ReviewsTab />})
- *   덕분에 이 컴포넌트는 '구매평' 탭 활성 시점에만 마운트됨.
- *   그래서 useEffect 가 자연스럽게 lazy fetch.
- *
- * 안전장치:
- *   - AbortController: 요청 중 unmount 시 abort (race condition 방어)
- *   - isMounted ref: 응답 늦게 도착 + setState 시 unmount 후 setState 방지
- *
- * 4-state UI:
- *   - loading: 초기 로딩 indicator
- *   - error: HTTP 에러 + 재시도
- *   - empty: 리뷰 0건 — 별점 차트는 빈 상태로 표시되고 리스트 영역만 별도 빈 메시지
- *   - data: 리뷰 리스트 카드 펼침
- *
- * 면접 포인트:
- *   - lazy fetch (탭 활성 시점에만 호출)
- *   - isMounted 가드 + AbortController 이중 안전장치
- *   - 정렬 placeholder 로 B6 후 자연스러운 확장점 표시
+ *   - onRequestWrite: () => void  (C2 신규, 작성 버튼 클릭)
+ *   - refetchKey: number          (C2 신규, 등록 성공 시 +1 → refetch 트리거)
  */
-export default function ReviewList({ productId }) {
+export default function ReviewList({ productId, onRequestWrite, refetchKey = 0 }) {
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -42,12 +30,10 @@ export default function ReviewList({ productId }) {
   const [totalElements, setTotalElements] = useState(0);
   const [isLast, setIsLast] = useState(true);
 
-  // 정렬 (B6 미완성 — UI placeholder)
   const [sort, setSort] = useState('latest');
 
   const isMountedRef = useRef(true);
 
-  // ─── 마운트/언마운트 ─────────────────────────────────────────────────
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -55,7 +41,11 @@ export default function ReviewList({ productId }) {
     };
   }, []);
 
-  // ─── lazy fetch — 탭 활성 시점에만 호출 ─────────────────────────────
+  // refetchKey 변경 시 첫 페이지로 돌아가서 다시 fetch
+  useEffect(() => {
+    if (refetchKey > 0) setPage(0);
+  }, [refetchKey]);
+
   useEffect(() => {
     if (!productId) return;
 
@@ -73,7 +63,6 @@ export default function ReviewList({ productId }) {
       })
       .then((data) => {
         if (!isMountedRef.current) return;
-        // PagedResponse 응답 (B5에서 정리한 9 필드)
         setReviews(data.content || []);
         setTotalElements(data.totalElements ?? 0);
         setIsLast(data.last ?? true);
@@ -88,11 +77,11 @@ export default function ReviewList({ productId }) {
       });
 
     return () => controller.abort();
-  }, [productId, page]);
+  }, [productId, page, refetchKey]);
 
   return (
     <div style={S.container}>
-      {/* ═══════ [1] 헤더 — 정렬 dropdown placeholder ═══════ */}
+      {/* ═══════ [1] 헤더 — 정렬 dropdown placeholder + 작성 버튼 ═══════ */}
       <div style={S.header}>
         <div style={S.headerLeft}>
           <h2 style={S.title}>구매평</h2>
@@ -103,22 +92,36 @@ export default function ReviewList({ productId }) {
           )}
         </div>
 
-        {/* 정렬 dropdown — B6 완성 전이라 disabled placeholder */}
-        <div style={S.sortGroup}>
-          <label style={S.sortLabel} htmlFor="review-sort">정렬</label>
-          <select
-            id="review-sort"
-            value={sort}
-            onChange={(e) => setSort(e.target.value)}
-            disabled
-            style={S.sortSelect}
-            title="정렬 기능은 백엔드 B6 완성 후 활성화됩니다"
-          >
-            <option value="latest">최신순</option>
-            <option value="rating_desc">별점 높은순</option>
-            <option value="rating_asc">별점 낮은순</option>
-            <option value="helpful">도움순</option>
-          </select>
+        <div style={S.headerRight}>
+          {/* 정렬 dropdown — B6 완성 전이라 disabled placeholder */}
+          <div style={S.sortGroup}>
+            <label style={S.sortLabel} htmlFor="review-sort">정렬</label>
+            <select
+              id="review-sort"
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+              disabled
+              style={S.sortSelect}
+              title="정렬 기능은 백엔드 B6 완성 후 활성화됩니다"
+            >
+              <option value="latest">최신순</option>
+              <option value="rating_desc">별점 높은순</option>
+              <option value="rating_asc">별점 낮은순</option>
+              <option value="helpful">도움순</option>
+            </select>
+          </div>
+
+          {/* C2 신규: 리뷰 작성 버튼 */}
+          {onRequestWrite && (
+            <button
+              type="button"
+              onClick={onRequestWrite}
+              style={S.writeBtn}
+              aria-label="리뷰 작성"
+            >
+              + 리뷰 작성
+            </button>
+          )}
         </div>
       </div>
 
@@ -144,6 +147,15 @@ export default function ReviewList({ productId }) {
             <div style={S.emptyIcon}>📝</div>
             <div style={S.emptyTitle}>아직 리뷰가 없습니다</div>
             <div style={S.emptySub}>구매하신 분들의 첫 리뷰를 기다리고 있어요</div>
+            {onRequestWrite && (
+              <button
+                type="button"
+                onClick={onRequestWrite}
+                style={S.emptyWriteBtn}
+              >
+                + 첫 리뷰 작성하기
+              </button>
+            )}
           </div>
         )}
 
@@ -155,7 +167,6 @@ export default function ReviewList({ productId }) {
               ))}
             </div>
 
-            {/* 페이지네이션 — B6 정렬 완성 후 함께 보강 */}
             <div style={S.pagination}>
               <button
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
@@ -200,7 +211,7 @@ function ReviewCard({ review }) {
     content,
     userName = '익명',
     createdAt,
-    verifiedPurchase = true, // B2 응답에 isVerifiedPurchase 있다 가정 (없으면 default true)
+    verifiedPurchase = true,
   } = review;
 
   return (
@@ -224,13 +235,10 @@ function ReviewCard({ review }) {
   );
 }
 
-// ─── 별점을 ★ 5개로 시각화 ─────────────────────────────────────────────
 function StarRating({ rating = 0 }) {
-  // rating 0.5 단위 (1.0~5.0). 5개 별 중 채움/반/빈 비율로 표시
   return (
     <div style={S.starGroup} aria-label={`별점 ${rating} / 5`}>
       {[1, 2, 3, 4, 5].map((n) => {
-        // 별 하나가 가득 찬 경우, 절반, 빈 경우
         let fillPercent = 0;
         if (rating >= n) fillPercent = 100;
         else if (rating > n - 1) fillPercent = (rating - (n - 1)) * 100;
@@ -253,7 +261,6 @@ function StarRating({ rating = 0 }) {
   );
 }
 
-// ─── 상대 시간 포맷 (방금 / N분 전 / N시간 전 / N일 전 / yyyy.mm.dd) ─
 function formatRelativeDate(dateStr) {
   if (!dateStr) return '';
   const d = new Date(dateStr);
@@ -270,7 +277,6 @@ function formatRelativeDate(dateStr) {
   if (diff < day) return `${Math.floor(diff / hour)}시간 전`;
   if (diff < 7 * day) return `${Math.floor(diff / day)}일 전`;
 
-  // 1주 이상은 yyyy.mm.dd
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
@@ -285,7 +291,6 @@ const S = {
     gap: 24,
   },
 
-  // 헤더
   header: {
     display: 'flex',
     alignItems: 'center',
@@ -296,6 +301,11 @@ const S = {
   headerLeft: {
     display: 'flex',
     alignItems: 'baseline',
+    gap: 12,
+  },
+  headerRight: {
+    display: 'flex',
+    alignItems: 'center',
     gap: 12,
   },
   title: {
@@ -311,7 +321,6 @@ const S = {
     fontVariantNumeric: 'tabular-nums',
   },
 
-  // 정렬
   sortGroup: {
     display: 'flex',
     alignItems: 'center',
@@ -334,19 +343,28 @@ const S = {
     appearance: 'menulist',
   },
 
-  // 차트 wrap
-  chartWrap: {
-    // RatingDistributionChart 가 자체 container 가 있어서 별도 box 필요 없음
+  writeBtn: {
+    background: '#18181b',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 8,
+    padding: '8px 16px',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+    fontFamily: 'inherit',
+    flexShrink: 0,
   },
 
-  // 리스트 wrap
+  chartWrap: {},
+
   listWrap: {
     display: 'flex',
     flexDirection: 'column',
     gap: 12,
   },
 
-  // 상태 박스 (loading/error)
   statusBox: {
     background: '#fff',
     border: '1px solid #e4e4e7',
@@ -357,7 +375,6 @@ const S = {
     fontSize: 14,
   },
 
-  // 빈 상태
   emptyBox: {
     background: '#fff',
     border: '1px solid #e4e4e7',
@@ -379,9 +396,21 @@ const S = {
   emptySub: {
     fontSize: 13,
     color: '#9ca3af',
+    marginBottom: 16,
+  },
+  emptyWriteBtn: {
+    background: '#18181b',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 8,
+    padding: '10px 20px',
+    fontSize: 13.5,
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    marginTop: 4,
   },
 
-  // 카드 리스트
   cardList: {
     display: 'flex',
     flexDirection: 'column',
@@ -441,7 +470,6 @@ const S = {
     wordBreak: 'break-word',
   },
 
-  // 별점 컴포넌트
   starGroup: {
     display: 'inline-flex',
     gap: 1,
@@ -470,7 +498,6 @@ const S = {
     whiteSpace: 'nowrap',
   },
 
-  // 페이지네이션
   pagination: {
     display: 'flex',
     alignItems: 'center',

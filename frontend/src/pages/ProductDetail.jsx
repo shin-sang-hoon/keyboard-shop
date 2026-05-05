@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import ProductGallery from '../components/ProductGallery';
 import ProductTabs from '../components/ProductTabs';
 import QnAFormModal from '../components/QnAFormModal';
+import ReviewFormModal from '../components/ReviewFormModal';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
 
@@ -34,7 +35,6 @@ const LAYOUT_LABELS = {
 };
 
 // ─── 인증 헬퍼 (5-A 미완 - 임시 localStorage 기반) ──────────────────
-// 5-A authStore 완성 시 마이그레이션. 현재는 단순 토큰 존재 여부로 판단.
 function getAuthToken() {
   return localStorage.getItem('accessToken');
 }
@@ -126,23 +126,22 @@ export default function ProductDetail() {
   const [error, setError] = useState(null);
 
   // ─── Like 상태 ────────────────────────────────────────────
-  // liked: 본인이 좋아요 눌렀는지 (로그인 시에만 의미 있음)
-  // likeCount: 전체 좋아요 수 (비로그인도 표시)
-  // 로딩 분리: count 만 먼저 fetch, liked 는 토글 시점에 알 수 있음
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
-  const [likeBusy, setLikeBusy] = useState(false); // 토글 중 중복 클릭 방지
+  const [likeBusy, setLikeBusy] = useState(false);
 
   // ─── Wishlist 상태 ────────────────────────────────────────
   const [wished, setWished] = useState(false);
   const [wishBusy, setWishBusy] = useState(false);
 
   // ─── QnA 모달 상태 (5-H C3) ──────────────────────────────
-  // qnaModalOpen: 작성 모달 열림 여부
-  // qnaRefetchKey: 등록 성공 시 +1 → QnAList 의 useEffect([refetchKey]) 트리거
-  //   Redux/Context 없이 부모 → 자식 단방향 refresh 신호 전달하는 가벼운 패턴.
   const [qnaModalOpen, setQnaModalOpen] = useState(false);
   const [qnaRefetchKey, setQnaRefetchKey] = useState(0);
+
+  // ─── Review 모달 상태 (5-H C2) ──────────────────────────
+  // C3 와 동일한 패턴 — modal open + refetchKey++ trigger.
+  const [reviewModalOpen, setReviewModalOpen] = useState(false);
+  const [reviewRefetchKey, setReviewRefetchKey] = useState(0);
 
   // ─── 토스트 ──────────────────────────────────────────────
   const [toast, setToast] = useState({ message: '', visible: false });
@@ -182,15 +181,10 @@ export default function ProductDetail() {
       .then((data) => setLikeCount(data.count ?? 0))
       .catch((err) => {
         if (err.name === 'AbortError') return;
-        // 카운트 fetch 실패는 silent (UI 0 으로 폴백, 사용자에게 토스트 안 띄움)
         console.warn('Like count fetch failed:', err.message);
       });
     return () => controller.abort();
   }, [id]);
-
-  // 주의: 로그인 사용자의 liked/wished 초기 상태는 별도 API 가 없어서
-  // 토글 시점에 서버 응답으로 동기화. 페이지 이탈 후 재진입 시 기존 상태가
-  // 보이지 않는 한계 — B1 ProductDto 에 isLikedByMe 추가하면 해결 가능.
 
   // ─── 토스트 표시 ──────────────────────────────────────────
   function showToast(message) {
@@ -207,7 +201,6 @@ export default function ProductDetail() {
     }
     if (likeBusy) return;
 
-    // 1) 낙관적 업데이트 — UI 즉시 반영
     const prevLiked = liked;
     const prevCount = likeCount;
     const nextLiked = !prevLiked;
@@ -231,12 +224,10 @@ export default function ProductDetail() {
         throw new Error(`HTTP ${res.status}`);
       }
 
-      // 2) 서버 응답으로 정확한 상태 동기화
       const data = await res.json();
       setLiked(data.liked);
       setLikeCount(data.count);
     } catch (err) {
-      // 3) 롤백
       setLiked(prevLiked);
       setLikeCount(prevCount);
 
@@ -250,7 +241,7 @@ export default function ProductDetail() {
     }
   }
 
-  // ─── 찜 토글 (낙관적 업데이트 + 401 롤백) ───────────────────
+  // ─── 찜 토글 ───────────────────────────────────────────────
   async function handleToggleWish() {
     if (!isLoggedIn()) {
       showToast('로그인이 필요합니다');
@@ -305,7 +296,6 @@ export default function ProductDetail() {
   }
 
   // ─── Q&A 질문하기 (5-H C3) ────────────────────────────────
-  // 비로그인 가드는 C6 패턴 그대로 — 토스트 + return.
   function handleRequestQnAWrite() {
     if (!isLoggedIn()) {
       showToast('로그인이 필요합니다');
@@ -314,11 +304,25 @@ export default function ProductDetail() {
     setQnaModalOpen(true);
   }
 
-  // 모달 등록 성공 콜백 — 모달 닫고 리스트 refetch 트리거 + 토스트.
   function handleQnaSuccess() {
     setQnaModalOpen(false);
     setQnaRefetchKey((k) => k + 1);
     showToast('질문이 등록되었습니다');
+  }
+
+  // ─── 리뷰 작성 (5-H C2) — C3 패턴 그대로 ─────────────────
+  function handleRequestReviewWrite() {
+    if (!isLoggedIn()) {
+      showToast('로그인이 필요합니다');
+      return;
+    }
+    setReviewModalOpen(true);
+  }
+
+  function handleReviewSuccess() {
+    setReviewModalOpen(false);
+    setReviewRefetchKey((k) => k + 1);
+    showToast('리뷰가 등록되었습니다');
   }
 
   // ─── 로딩 / 에러 ──────────────────────────────────────────
@@ -358,7 +362,6 @@ export default function ProductDetail() {
         />
 
         <div style={S.layout}>
-          {/* 좌측 갤러리 (5-H C1-a) */}
           <div style={S.imageColumn}>
             <ProductGallery
               images={product.images}
@@ -366,9 +369,7 @@ export default function ProductDetail() {
             />
           </div>
 
-          {/* 우측 정보 / CTA */}
           <div style={S.infoColumn}>
-            {/* 상품명 + ♥ 좋아요 (인기도) */}
             <div style={S.titleRow}>
               <h1 style={S.title}>{product.name}</h1>
               <button
@@ -401,15 +402,12 @@ export default function ProductDetail() {
               </button>
             </div>
 
-            {/* 가격 */}
             <div style={S.price}>
               ₩{(product.price || 0).toLocaleString()}
             </div>
 
-            {/* 스펙 칩 */}
             <SpecChips product={product} />
 
-            {/* 메타 박스 */}
             <div style={S.metaBox}>
               <div style={S.metaRow}>
                 <span style={S.metaLabel}>브랜드</span>
@@ -432,7 +430,6 @@ export default function ProductDetail() {
               </div>
             </div>
 
-            {/* 3D 미리보기 (GLB 있을 때만) */}
             {hasGlb && (
               <button onClick={handle3DPreview} style={S.previewBtn}>
                 <span style={{ fontSize: 16, marginRight: 8 }}>🧊</span>
@@ -440,7 +437,6 @@ export default function ProductDetail() {
               </button>
             )}
 
-            {/* 메인 CTA — 구매 / 장바구니 */}
             <div style={S.ctaRow}>
               <button onClick={handleBuy} style={S.buyBtn}>
                 구매하기
@@ -451,7 +447,6 @@ export default function ProductDetail() {
               </button>
             </div>
 
-            {/* ⭐ 찜 (보조) */}
             <button
               onClick={handleToggleWish}
               disabled={wishBusy}
@@ -478,21 +473,32 @@ export default function ProductDetail() {
           </div>
         </div>
 
-        {/* 5-H C1-b + C3: 4-tab nav (sticky) + Q&A 모달 트리거 */}
+        {/* 5-H C1-b + C2 + C3: 4-tab nav (sticky) + Review/Q&A 모달 트리거 */}
         <ProductTabs
           product={product}
           productId={product.id}
           onRequestQnAWrite={handleRequestQnAWrite}
           qnaRefetchKey={qnaRefetchKey}
+          onRequestReviewWrite={handleRequestReviewWrite}
+          reviewRefetchKey={reviewRefetchKey}
         />
       </div>
 
-      {/* 5-H C3: Q&A 작성 모달 (열렸을 때만 마운트 — 초기 렌더 비용 0) */}
+      {/* 5-H C3: Q&A 작성 모달 */}
       {qnaModalOpen && (
         <QnAFormModal
           productId={product.id}
           onClose={() => setQnaModalOpen(false)}
           onSuccess={handleQnaSuccess}
+        />
+      )}
+
+      {/* 5-H C2: 리뷰 작성 모달 */}
+      {reviewModalOpen && (
+        <ReviewFormModal
+          productId={product.id}
+          onClose={() => setReviewModalOpen(false)}
+          onSuccess={handleReviewSuccess}
         />
       )}
 

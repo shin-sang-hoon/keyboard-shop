@@ -11,6 +11,7 @@ import RefundPolicy from './RefundPolicy';
  *
  * 변경 이력:
  *   - C1-c: ReviewsTab placeholder → <ReviewList />
+ *   - C2:   ReviewList 작성 모달 트리거 + refetchKey 전달
  *   - C3:   QnATab placeholder → <QnAList /> (modal trigger via parent)
  *   - C7:   RefundTab placeholder → <RefundPolicy /> (정책 + FAQ + 고객센터 CTA)
  *
@@ -28,7 +29,14 @@ const TABS = [
 
 const VALID_KEYS = new Set(TABS.map((t) => t.key));
 
-export default function ProductTabs({ product, productId, onRequestQnAWrite, qnaRefetchKey = 0 }) {
+export default function ProductTabs({
+  product,
+  productId,
+  onRequestQnAWrite,
+  qnaRefetchKey = 0,
+  onRequestReviewWrite,
+  reviewRefetchKey = 0,
+}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabsRef = useRef(null);
 
@@ -113,7 +121,13 @@ export default function ProductTabs({ product, productId, onRequestQnAWrite, qna
         style={S.panel}
       >
         {activeTab === 'detail'  && <DetailTab product={product} />}
-        {activeTab === 'reviews' && <ReviewList productId={productId} />}
+        {activeTab === 'reviews' && (
+          <ReviewList
+            productId={productId}
+            onRequestWrite={onRequestReviewWrite}
+            refetchKey={reviewRefetchKey}
+          />
+        )}
         {activeTab === 'qna'     && (
           <QnAList
             productId={productId}
