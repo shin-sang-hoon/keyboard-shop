@@ -1,8 +1,22 @@
+# Web framework
 fastapi==0.128.8
 uvicorn==0.39.0
+starlette==0.49.3
+
+# HTTP client
 httpx==0.28.1
-sqlalchemy==2.0.49
-pymysql==1.1.2
+
+# DB (database.py 의존)
+SQLAlchemy==2.0.49
+PyMySQL==1.1.2
+
+# Scheduler (3:00 AM 자동 크롤)
+APScheduler==3.11.2
+tzlocal==5.3.1
+
+# Env
 python-dotenv==1.2.1
-apscheduler==3.10.4
-playwright==1.44.0
+
+# Crawler (5-H D2 후속)
+playwright==1.58.0
+playwright-stealth==2.0.3
