@@ -21,23 +21,29 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 크롤러 internal upsert 서비스 (5-H D1 확장).
+ * 크롤러 internal upsert 서비스 (5-H D1 + D2 후속 확장).
  *
- * D1 추가:
+ * D1 추가 (5/2):
  *   - imageUrls: List<String> 배열 수신 → ProductImage 테이블에 적재 (1:N)
  *   - clean-replace 패턴: 기존 product_images row 들 먼저 삭제 → 신규 N장 INSERT
  *     ↳ 5/2 A5 마이그레이션의 1장씩 적재를 N장씩으로 자연스럽게 진화
  *   - imageUrls 비어있으면 imageUrl 1장으로 fallback (후방 호환)
  *
+ * D2 후속 추가 (5/6 — swagkey path):
+ *   - brandName null safety: 빈 brand 면 "Unknown" 으로 fallback (NPE 방지)
+ *   - productType 직접 매핑: 카테고리가 사이트 메뉴에서 명확한 source (스웨그키) 의 경우
+ *     크롤 시점에 KEYBOARD/SWITCH_PART/ACCESSORY 매핑 (5-G v3 SQL 키워드 분류 우회)
+ *
  * Note:
  *   DTO 의 productUrl 필드는 Product 엔티티에 매핑되지 않음 (의도된 디자인).
- *   다중 이미지 추출은 source_id 안의 네이버 productId 로 충분.
  *
  * 면접 포인트:
- *   - "1차 마이그레이션 (A5) 은 image_url 1장씩 적재 → 2차 (D1) 는 N장씩 재적재.
- *      같은 테이블이지만 데이터 의미가 발전한 clean-replace 패턴.
- *      productImageRepository.deleteByProductId() 로 기존 row 들 제거 후
- *      saveAll() 로 신규 N장 INSERT — 트랜잭션 한 번에 처리해서 일관성 보장"
+ *   - 1차 마이그레이션 (A5) 은 image_url 1장씩 적재 → 2차 (D1) 는 N장씩 재적재.
+ *     같은 테이블이지만 데이터 의미가 발전한 clean-replace 패턴.
+ *     productImageRepository.deleteByProductId() 로 기존 row 들 제거 후
+ *     saveAll() 로 신규 N장 INSERT — 트랜잭션 한 번에 처리해서 일관성 보장
+ *   - productType 분류 트레이드오프: naver_* 는 데이터가 어지러워서 키워드 SQL 분류 (v3),
+ *     swagkey 는 메뉴 자체가 명확해서 크롤 시점 직접 매핑. 데이터 흐름 깔끔.
  */
 @Slf4j
 @Service
@@ -115,15 +121,32 @@ public class InternalCrawlerService {
     }
 
     private InternalProductDtos.UpsertResponse doUpsert(InternalProductDtos.UpsertRequest request) {
-        Brand brand = brandRepository.findByName(request.getBrandName())
+        // 5-H D2: brandName null safety (swagkey 처럼 brand 정보 없는 source 대응)
+        // null/blank 면 "Unknown" 으로 fallback. 일관성 + NPE 방지.
+        String resolvedBrandName = request.getBrandName();
+        if (resolvedBrandName == null || resolvedBrandName.isBlank()) {
+            resolvedBrandName = "Unknown";
+        }
+        final String brandNameForLambda = resolvedBrandName;
+        Brand brand = brandRepository.findByName(brandNameForLambda)
                 .orElseGet(() -> brandRepository.save(
-                        Brand.builder().name(request.getBrandName()).build()
+                        Brand.builder().name(brandNameForLambda).build()
                 ));
 
         // 5-H D1: imageUrls 우선, 없으면 imageUrl 1장으로 fallback (후방 호환)
         List<String> imageUrls = resolveImageUrls(request);
         // product.image_url 컬럼은 첫 번째 이미지로 동기화 (카드 UI 등 단일 이미지 사용처)
         String primaryImageUrl = imageUrls.isEmpty() ? null : imageUrls.get(0);
+
+        // 5-H D2: productType 명시되면 enum 변환 (swagkey 카테고리 매핑)
+        Product.ProductType resolvedProductType = null;
+        if (request.getProductType() != null && !request.getProductType().isBlank()) {
+            try {
+                resolvedProductType = Product.ProductType.valueOf(request.getProductType());
+            } catch (IllegalArgumentException e) {
+                log.warn("알 수 없는 productType={}, 무시", request.getProductType());
+            }
+        }
 
         Optional<Product> existing = productRepository.findBySourceId(request.getSourceId());
 
@@ -141,8 +164,18 @@ public class InternalCrawlerService {
             product.setConnectionType(request.getConnectionType());
             if (request.getGlbUrl() != null) product.setGlbUrl(request.getGlbUrl());
             product.setBrand(brand);
+            // 5-H D2: productType 명시되면 적용 (null 이면 기존 값 유지)
+            if (resolvedProductType != null) {
+                product.setProductType(resolvedProductType);
+            }
             upsertStatus = "updated";
         } else {
+            // 5-H D2: 신규 product 의 productType 기본값
+            // - request.productType 명시 → 그 값
+            // - null → UNCLASSIFIED (5-G v3 SQL 분류 후처리 가능)
+            Product.ProductType pt = resolvedProductType != null
+                    ? resolvedProductType
+                    : Product.ProductType.UNCLASSIFIED;
             product = Product.builder()
                     .sourceId(request.getSourceId())
                     .name(request.getName())
@@ -154,6 +187,7 @@ public class InternalCrawlerService {
                     .connectionType(request.getConnectionType())
                     .glbUrl(request.getGlbUrl())
                     .brand(brand)
+                    .productType(pt)
                     .build();
             product = productRepository.save(product);
             upsertStatus = "created";

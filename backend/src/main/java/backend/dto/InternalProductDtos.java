@@ -35,6 +35,15 @@ public class InternalProductDtos {
         private String mountingType;
         private String connectionType;
         private String glbUrl;
+
+        /**
+         * 5-H D2 후속 (swagkey path) 신규 — 상품 카테고리 직접 매핑.
+         * 스웨그키처럼 사이트 메뉴가 카테고리로 명확히 분류된 source 의 경우,
+         * 크롤 시점에 KEYBOARD/SWITCH_PART/ACCESSORY 등으로 매핑.
+         * null 이면 Service 레이어에서 분류 안 건드림 (5-G v3 SQL 경로 그대로).
+         * 허용 값: KEYBOARD / MOUSE / SWITCH_PART / ACCESSORY / NOISE / UNCLASSIFIED
+         */
+        private String productType;
     }
 
     @Getter @Setter
@@ -52,7 +61,7 @@ public class InternalProductDtos {
     @NoArgsConstructor @AllArgsConstructor
     @Builder
     public static class BatchUpsertRequest {
-        private String siteName;          // "naver_shopping" | "keychron_brand"
+        private String siteName;          // "naver_shopping" | "keychron_brand" | "swagkey"
         private String siteUrl;
         private List<UpsertRequest> products;
     }
