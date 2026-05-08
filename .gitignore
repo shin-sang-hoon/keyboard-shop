@@ -26,3 +26,8 @@ fastapi/.env
 # Frontend env (local only)
 frontend/.env
 frontend/.env.local
+ 
+# DB backup files (5-B ddl-auto migration work) 
+*backup*.sql 
+keyboard_db_backup_*.sql 
+schema_dump_*.sql 
