@@ -4,19 +4,23 @@ import lombok.Getter;
 import org.springframework.http.HttpStatus;
 
 /**
- * 비즈니스 예외 통합 클래스 (5-H A6 추가).
+ * Unified business exception (added 5-H A6, extended 5-B).
  *
- * Service 레이어에서 도메인 규칙 위반 시 던지는 RuntimeException.
- * GlobalExceptionHandler 가 status 별로 적절한 HTTP 응답으로 변환.
+ * Throw from Service when domain rules are violated.
+ * GlobalExceptionHandler converts to appropriate HTTP response by status.
  *
- * Static factory 4개 (notFound/forbidden/badRequest/conflict) 로
- * 호출부에서 의도가 명확.
+ * Static factories cover the common cases:
+ *   - notFound (404): missing resource
+ *   - forbidden (403): authenticated but not authorized
+ *   - unauthorized (401): not authenticated / bad credentials  [added 5-B]
+ *   - badRequest (400): rule violation, validation error
+ *   - conflict (409): unique constraint, duplicate state transition
  *
- * 면접 포인트:
- *  - RuntimeException 상속 → @Transactional 자동 롤백
- *  - HttpStatus 를 예외 자체에 보유 → 핸들러 1개로 다 처리
- *  - Service 가 HTTP 를 알아도 되나? → 도메인 의미("이미 존재")를 HTTP 시맨틱(409)에
- *    매핑하는 책임은 Service 가 가장 잘 안다. Spring 표준 패턴.
+ * Design notes:
+ *  - Extends RuntimeException so @Transactional auto-rollback applies.
+ *  - Single exception type carrying HttpStatus keeps handler count to one.
+ *  - Service knowing about HTTP semantics is acceptable in Spring REST apps;
+ *    the alternative (custom exception per case) explodes the handler count.
  */
 @Getter
 public class BusinessException extends RuntimeException {
@@ -34,6 +38,14 @@ public class BusinessException extends RuntimeException {
 
     public static BusinessException forbidden(String message) {
         return new BusinessException(HttpStatus.FORBIDDEN, message);
+    }
+
+    /**
+     * 5-B added. Use for "not authenticated" / "bad credentials" cases.
+     * Distinct from forbidden(403) which means "authenticated but not allowed".
+     */
+    public static BusinessException unauthorized(String message) {
+        return new BusinessException(HttpStatus.UNAUTHORIZED, message);
     }
 
     public static BusinessException badRequest(String message) {

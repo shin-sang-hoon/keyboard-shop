@@ -17,11 +17,15 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 /**
- * Spring Security 설정.
+ * Spring Security configuration.
  *
- * 매처 순서 원칙: 좁은 경로(구체적) 먼저, 넓은 경로(/**) 마지막.
- * 같은 경로라도 GET-only permitAll → method 불문 authenticated 순으로 둬야
- * "GET 공개 + CUD 인증" 패턴이 성립한다.
+ * Pattern: more specific paths first, broader (/**) second.
+ *
+ * 5-B (5/8) changes:
+ *  - /api/auth/me explicitly authenticated() (others under /api/auth/** are entry points).
+ *  - exceptionHandling() wired with custom handlers so unauthenticated requests
+ *    return 401 (not Spring's default 403). 403 is reserved for "authenticated
+ *    but role insufficient" cases (e.g. USER calling /api/admin/...).
  */
 @Configuration
 @EnableWebSecurity
@@ -29,6 +33,8 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final JwtFilter jwtFilter;
+    private final RestAuthenticationEntryPoint authenticationEntryPoint;
+    private final RestAccessDeniedHandler accessDeniedHandler;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -37,32 +43,36 @@ public class SecurityConfig {
                 .cors(Customizer.withDefaults())
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+
+                // 401/403 separation - HTTP semantics correct, frontend-friendly JSON body
+                .exceptionHandling(eh -> eh
+                        .authenticationEntryPoint(authenticationEntryPoint)
+                        .accessDeniedHandler(accessDeniedHandler))
+
                 .authorizeHttpRequests(auth -> auth
-                        // ── 인증/인가 ────────────────────────────────────────
+                        // Auth - /me requires token, others are entry points
+                        .requestMatchers("/api/auth/me").authenticated()
                         .requestMatchers("/api/auth/**").permitAll()
 
-                        // ── 상품 좋아요/찜 (5-H B4) ────────────────────────
-                        // 카운트 조회는 공개, 토글은 인증 필요.
-                        // products/** permitAll 보다 먼저 등록되어야 한다.
+                        // Product like (5-H B4) - count public, toggle authenticated
                         .requestMatchers("/api/products/*/like/count").permitAll()
                         .requestMatchers("/api/products/*/like").authenticated()
                         .requestMatchers("/api/products/*/wishlist").authenticated()
                         .requestMatchers("/api/wishlist", "/api/wishlist/**").authenticated()
 
-                        // ── 일반 조회 (비로그인 허용) ────────────────────────
+                        // General product/category browsing - public
                         .requestMatchers("/api/products", "/api/products/**").permitAll()
                         .requestMatchers("/api/categories", "/api/categories/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/internal/**").permitAll()
 
-                        // ── 관리자 ──────────────────────────────────────────
+                        // Admin
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
-                        // ── 리뷰 (5-H B2) — CUD 인증 필요 ────────────────
+                        // Reviews (5-H B2) - CUD authenticated
                         .requestMatchers("/api/reviews", "/api/reviews/**").authenticated()
 
-                        // ── QnA (5-H B3) — GET 공개(마스킹 처리), CUD 인증 ──
-                        // 좁은 GET 매처 먼저, 넓은 authenticated 매처 나중.
+                        // QnA (5-H B3) - GET public (with masking), CUD authenticated
                         .requestMatchers(HttpMethod.GET, "/api/qna", "/api/qna/**").permitAll()
                         .requestMatchers("/api/qna", "/api/qna/**").authenticated()
 
