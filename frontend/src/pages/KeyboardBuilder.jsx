@@ -273,8 +273,13 @@ function tagMeshRoles(model, fileName) {
 let _productsPromise = null;
 function fetchAllProducts() {
   if (_productsPromise) return _productsPromise;
-  _productsPromise = fetch(`${API_BASE}/products`)
-    .then(r => r.ok ? r.json() : [])
+  // 5/10 fix: ProductService PagedResponse 도입(4/27 21ae31c) 이후 응답이 배열이 아닌
+  //          { content: [...], totalElements, ... } 객체 → for...of 시 TypeError.
+  //          variants 빌드 + 후속 useEffect 모두 죽어 색상/레이아웃 토글 미작동의 root cause.
+  //          size=2000 으로 전체 키보드 한 번에 가져오기 (디폴트 24면 다른 시리즈 누락).
+  _productsPromise = fetch(`${API_BASE}/products?size=2000`)
+    .then(r => r.ok ? r.json() : { content: [] })
+    .then(data => Array.isArray(data) ? data : (data.content || []))
     .catch(() => []);
   return _productsPromise;
 }
@@ -471,6 +476,10 @@ export default function KeyboardBuilder({
 
   const applyColors = useCallback((keycapHex, caseHex) => {
     if (!modelRef.current) return;
+    // 5/10 디버그: K8 Pro 같은 PBR 모델에 baseColorTexture 가 붙어있으면 .color.set() 만으로는
+    //             색상이 약하게 적용되거나 안 바뀜. mat.map = null + needsUpdate 로 강제 갱신.
+    console.log("[applyColors] 호출:", { keycapHex, caseHex });
+    let appliedKeycap = 0, appliedCase = 0;
     modelRef.current.traverse(child => {
       if (!child.isMesh) return;
       const role = child.userData.role;
@@ -482,11 +491,17 @@ export default function KeyboardBuilder({
         if (!mat?.color) return;
         if (target) {
           mat.color.set(target);
+          // 텍스처가 색상을 덮으면 색상 변경이 안 보임 → 색상 적용 시 텍스처 제거
+          if (mat.map) mat.map = null;
+          mat.needsUpdate = true;
+          if (role === 'keycap') appliedKeycap++; else appliedCase++;
         } else if (origs[i]) {
           mat.color.copy(origs[i]);
+          mat.needsUpdate = true;
         }
       });
     });
+    console.log(`[applyColors] 적용됨 — keycap:${appliedKeycap}, case:${appliedCase}`);
   }, []);
 
   // ── GLB 로드 ─────────────────────────────────────────────────────────────
