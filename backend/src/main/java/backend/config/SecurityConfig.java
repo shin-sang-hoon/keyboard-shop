@@ -69,6 +69,9 @@ public class SecurityConfig {
                         // Admin
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
+                        // [TEMP] 7-A AuditLog @Aspect 검증용 — 검증 끝나면 제거하고 진짜 ADMIN 컨트롤러로 대체
+                        .requestMatchers("/api/test-audit/**").permitAll()
+
                         // Reviews (5-H B2) - CUD authenticated
                         .requestMatchers("/api/reviews", "/api/reviews/**").authenticated()
 

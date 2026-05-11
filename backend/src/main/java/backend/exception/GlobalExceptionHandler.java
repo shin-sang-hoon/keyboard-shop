@@ -19,6 +19,7 @@ import java.util.stream.Collectors;
  *
  * 5-G 마무리 시점 (4/27) 추가 — MethodArgumentTypeMismatchException.
  * 5-H A6 (5/3) 추가 — BusinessException (notFound/forbidden/badRequest/conflict).
+ * 7-A (5/11) 추가 — Exception catch-all (RuntimeException → 401 잘못 반환 → 500 정정).
  */
 @Slf4j
 @RestControllerAdvice
@@ -76,6 +77,30 @@ public class GlobalExceptionHandler {
                         e.getStatus().value(),
                         e.getStatus().getReasonPhrase(),
                         e.getMessage()));
+    }
+
+    /**
+     * 처리되지 않은 모든 예외의 catch-all — 500 Internal Server Error.
+     *
+     * 추가 배경 (7-A 검증 중 발견, 5/11):
+     *  - 기존엔 RuntimeException 이 GlobalExceptionHandler 에 잡히지 않아
+     *    Spring Security ExceptionTranslationFilter 까지 올라가서
+     *    AuthenticationEntryPoint 가 호출되어 401 응답이 나오는 버그.
+     *  - 인증/인가와 무관한 비즈니스 실패가 401 로 표시되는 잘못된 HTTP semantics.
+     *  - 5-B 의 401/403 분리 원칙과 일관되도록 500 으로 명시적 처리.
+     *
+     * 운영 안전성:
+     *  - 스택트레이스는 log.error 로만 (사용자 응답엔 메시지만)
+     *  - BusinessException 으로 명시 안 한 예외는 서버 버그로 간주 → 500
+     */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ErrorResponse> handleUnexpected(Exception e) {
+        log.error("Unhandled exception: {}", e.getMessage(), e);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(new ErrorResponse(
+                        HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                        "Internal Server Error",
+                        "An unexpected error occurred. Please try again later."));
     }
 
     /**
