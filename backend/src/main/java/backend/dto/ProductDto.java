@@ -23,6 +23,7 @@ public class ProductDto {
         private String sourceId;
         private String glbUrl;
         private Product.ProductStatus status;
+        private Product.ProductType productType;   // 5-H D: 카테고리 분류 (KEYBOARD/MOUSE/SWITCH_PART/ACCESSORY/NOISE/UNCLASSIFIED)
     }
 
     @Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor
@@ -43,6 +44,7 @@ public class ProductDto {
         private String sourceId;
         private String glbUrl;
         private Product.ProductStatus status;
+        private String productType;   // 5-H D: enum.name() 문자열 ("KEYBOARD" 등) — 프론트 hasGlb 판정 + 카테고리 탭 필터링용
         private LocalDateTime createdAt;
 
         // 5-H B1: ProductImage 1:N + Review/QnA 집계 (N+1 방어 — Service 에서 IN 절 일괄 fetch)

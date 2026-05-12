@@ -43,7 +43,12 @@ public class ProductService {
     private final QnARepository qnaRepository;
 
     /**
-     * 상품 목록 조회 — 페이지네이션 + 검색 + productType 필터.
+     * 상품 목록 조회 — 페이지네이션 + 검색 + productType 필터 + status='ACTIVE' 강제.
+     *
+     * 5-H 후속 (5/10) 변경:
+     *   - 4-way 분기 → 단일 JPQL 통합 (productRepository.findActiveWithFilters)
+     *   - 공개 API 는 항상 ACTIVE 만 노출 (V3 SQL 로 INACTIVE 처리한 데이터 자동 hide)
+     *   - 캐시 v2 → v3 bump (stale 캐시 무효화, 4/27 PageImpl 사고와 동일 패턴)
      *
      * 5-H B1 enrichment 패턴:
      *   1) Page<Product> 가져오기 (EntityGraph 로 brand/category JOIN FETCH — Step 4)
@@ -53,28 +58,25 @@ public class ProductService {
      * 쿼리 카운트: 24개 페이지 = 5쿼리 (count 1 + page 1 + images 1 + review 1 + qna 1)
      * 페이지 크기 무관하게 상수. @Formula 서브쿼리 컬럼 (3N 추가) 보다 효율적.
      *
-     * @Cacheable products_v2 캐시는 PagedResponse 직렬화 (PageImpl 아님 — 4/27 사고 회피).
+     * @Cacheable products_v3 캐시는 PagedResponse 직렬화 (PageImpl 아님 — 4/27 사고 회피).
      */
     @Cacheable(
-            value = "products_v2",
+            value = "products_v3",
             key = "(#search == null ? 'all' : #search.trim().toLowerCase()) + '-' " +
                     "+ (#productType == null ? 'any' : #productType.name()) + '-' " +
                     "+ #pageable.pageNumber + '-' + #pageable.pageSize"
     )
     public PagedResponse<ProductDto.Response> getAllProducts(String search, ProductType productType, Pageable pageable) {
-        Page<Product> page;
         boolean hasSearch = search != null && !search.isBlank();
         String trimmed = hasSearch ? search.trim() : null;
 
-        if (hasSearch && productType != null) {
-            page = productRepository.findByNameContainingIgnoreCaseAndProductType(trimmed, productType, pageable);
-        } else if (hasSearch) {
-            page = productRepository.findByNameContainingIgnoreCase(trimmed, pageable);
-        } else if (productType != null) {
-            page = productRepository.findByProductType(productType, pageable);
-        } else {
-            page = productRepository.findAll(pageable);
-        }
+        // 5-H 후속 (5/10): 4-way 분기 → 단일 JPQL 호출 + status='ACTIVE' 강제
+        Page<Product> page = productRepository.findActiveWithFilters(
+                trimmed,
+                productType,
+                Product.ProductStatus.ACTIVE,
+                pageable
+        );
 
         // 5-H B1: 외부 Map 3개 미리 fetch (closure 로 toResponse 에 주입)
         List<Product> products = page.getContent();
@@ -97,7 +99,7 @@ public class ProductService {
     }
 
     @Transactional
-    @CacheEvict(value = "products_v2", allEntries = true)
+    @CacheEvict(value = "products_v3", allEntries = true)
     public ProductDto.Response createProduct(ProductDto.Request request) {
         Brand brand = request.getBrandId() != null ?
                 brandRepository.findById(request.getBrandId()).orElse(null) : null;
@@ -119,6 +121,7 @@ public class ProductService {
                 .gbStatus(request.getGbStatus())
                 .sourceId(request.getSourceId())
                 .status(request.getStatus() != null ? request.getStatus() : Product.ProductStatus.ACTIVE)
+                .productType(request.getProductType() != null ? request.getProductType() : Product.ProductType.UNCLASSIFIED)
                 .build();
 
         Product saved = productRepository.save(product);
@@ -127,7 +130,7 @@ public class ProductService {
     }
 
     @Transactional
-    @CacheEvict(value = "products_v2", allEntries = true)
+    @CacheEvict(value = "products_v3", allEntries = true)
     public ProductDto.Response updateProduct(Long id, ProductDto.Request request) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("상품을 찾을 수 없습니다."));
@@ -150,6 +153,7 @@ public class ProductService {
         product.setConnectionType(request.getConnectionType());
         product.setGbStatus(request.getGbStatus());
         if (request.getStatus() != null) product.setStatus(request.getStatus());
+        if (request.getProductType() != null) product.setProductType(request.getProductType());
 
         Product saved = productRepository.save(product);
         // 기존 상품 — 이미지/리뷰가 있을 수 있어 fetch
@@ -161,7 +165,7 @@ public class ProductService {
     }
 
     @Transactional
-    @CacheEvict(value = "products_v2", allEntries = true)
+    @CacheEvict(value = "products_v3", allEntries = true)
     public void deleteProduct(Long id) {
         productRepository.deleteById(id);
     }
@@ -229,6 +233,7 @@ public class ProductService {
                 .glbUrl(p.getGlbUrl())
                 .sourceId(p.getSourceId())
                 .status(p.getStatus())
+                .productType(p.getProductType() != null ? p.getProductType().name() : null)
                 .createdAt(p.getCreatedAt())
                 // 5-H B1
                 .images(imagesMap.getOrDefault(pid, Collections.emptyList()))

@@ -1,29 +1,22 @@
 """
-스웨그키 (swagkey.kr) 2-tier 풀 크롤러 v2 (5-H D2 후속).
+스웨그키 (swagkey.kr) 2-tier 풀 크롤러 v3 (이미지 매핑 버그 fix).
 
-발견된 사이트 구조 (3-tier):
-  /{cate_id}                       카테고리 페이지 (예: /109 Keyboards)
-    ├─ /{prd_no}                   브랜드 hub (예: /1816928659 Swagkeys)
-    │    └─ /{prd_no}/?idx={N}     진짜 상품 detail (예: ?idx=1785 Smurve80)
-    └─ /{cate_id}/?idx={N}         직접 노출 상품 (예: /109/?idx=1747 NEO75)
+이전 버전 (v2) 의 문제:
+  - img[src*='cdn'] selector 가 헤더 로고 (cdn.imweb.me/thumbnail/cfe04b...png) 도
+    매칭 → DOM 순서상 헤더 로고가 먼저 잡혀서 모든 상품 114개가 동일 URL 로 저장됨.
 
-진짜 상품 = /{anything}/?idx={N} 형식 (idx 가 있어야 진짜).
-
-크롤 전략:
-  Tier 1) /109 카테고리 → href 수집:
-            (a) /{N자리}            → brand hub set 에 추가
-            (b) /{cate}/?idx={N}    → product set 에 직접 추가
-  Tier 2) brand hub 각각 → /{brand_no}/?idx={N} 수집 → product set
-  Tier 3) product set 각각 → detail 추출
-
-source_id = swagkey_{prd_no}_{idx}  (unique)
+v3 변경 (2026-05-09):
+  - 이미지 추출 로직을 extract_images() 로 분리.
+  - og:image meta 태그 우선 (메인 이미지 1장 보장).
+  - cdn-optimized.imweb.me 도메인만 매칭 (실제 상품 이미지).
+    cdn.imweb.me 는 헤더/푸터/UI 이미지라 차단.
+  - 파일 ID 기준 dedup (같은 사진의 다른 사이즈 버전 중복 방지).
 
 면접 자산:
-  "/109 listing 만 긁으면 126개 brand hub 가 잡혔지만 진짜 상품이 아니었다.
-   각각이 시리즈 hub 페이지라 그 안에 다시 /{prd_no}/?idx={N} 형식의 진짜
-   상품 22개씩 들어 있었음. 1-tier 가정이 깨져서 2-tier 크롤로 재설계."
-
-D1 (5/2) 다중 이미지 패턴 그대로 재사용 (clean-replace).
+  "이전엔 모든 swagkey 상품이 같은 헤더 로고 URL 로 저장된 버그. DOM 분석 결과
+   사이트가 두 CDN 도메인을 분리 사용하는 것을 발견 (cdn.imweb.me=UI 이미지,
+   cdn-optimized.imweb.me=상품 이미지). 단일 selector + first-match 의 문제를
+   og:image meta + 도메인 화이트리스트로 정확히 해결."
 """
 
 from __future__ import annotations
@@ -69,11 +62,6 @@ async def collect_from_listing(
 ) -> tuple[set[str], set[tuple[str, str]]]:
     """
     카테고리 페이지에서 brand hub 와 직접 상품 분리 수집.
-
-    Returns:
-        (brand_hubs, direct_products)
-        - brand_hubs: {"1816928659", "206892977", ...}  (Tier 2 진입할 prd_no 들)
-        - direct_products: {("109", "1747"), ...}        (즉시 detail 추출할 (prd_no, idx) 페어)
     """
     url = f"{BASE}/{cate_id}"
     logger.info(f"[Tier 1] 카테고리 listing 진입: {url}")
@@ -81,9 +69,8 @@ async def collect_from_listing(
     await page.wait_for_timeout(2500)
 
     brand_hubs: set[str] = set()
-    direct_products: set[tuple[str, str]] = set()  # (prd_no, idx)
+    direct_products: set[tuple[str, str]] = set()
 
-    # 모든 a 태그 href 수집
     hrefs: set[str] = set()
     for a in await page.locator("a").all():
         try:
@@ -94,12 +81,10 @@ async def collect_from_listing(
             pass
 
     for href in hrefs:
-        # /{prd_no}/?idx={N} 또는 /{cate_id}/?idx={N} 둘 다 매칭
         m_idx = re.match(r"^/(\d{2,})/?\?idx=(\d+)", href)
         if m_idx:
             direct_products.add((m_idx.group(1), m_idx.group(2)))
             continue
-        # /{prd_no} (idx 없음, 6자리 이상) — brand hub 후보
         m_hub = re.match(r"^/(\d{6,})/?$", href)
         if m_hub:
             brand_hubs.add(m_hub.group(1))
@@ -115,12 +100,6 @@ async def collect_from_listing(
 async def collect_from_brand_hub(
     page: Page, brand_no: str
 ) -> set[tuple[str, str]]:
-    """
-    brand hub 페이지에서 /{brand_no}/?idx={N} 형식 진짜 상품 수집.
-
-    Returns:
-        {(brand_no, idx), ...}
-    """
     url = f"{BASE}/{brand_no}"
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=15000)
@@ -135,7 +114,6 @@ async def collect_from_brand_hub(
             href = await a.get_attribute("href", timeout=300)
             if not href:
                 continue
-            # /{any_prd_no}/?idx={N}
             m = re.match(r"^/(\d+)/?\?idx=(\d+)", href)
             if m:
                 products.add((m.group(1), m.group(2)))
@@ -150,36 +128,106 @@ async def collect_from_brand_hub(
 SITE_NAME_TITLE = "스웨그키 공식 온라인 스토어"
 
 
+def _file_id(url: str) -> str:
+    """URL 에서 파일명만 추출 (확장자 + query 제외).
+
+    예: https://cdn-optimized.imweb.me/thumbnail/20251218/1096ea89c0b80.jpg?w=750
+        → '1096ea89c0b80'
+
+    같은 이미지의 다른 사이즈 버전 (?w=750 vs ?w=1200) 중복 제거 용도.
+    """
+    try:
+        path = url.split("?", 1)[0]                 # query 제거
+        filename = path.rsplit("/", 1)[-1]          # 파일명만
+        return filename.rsplit(".", 1)[0]           # 확장자 제거
+    except Exception:
+        return url
+
+
+async def extract_images(page: Page) -> list[str]:
+    """
+    상품 이미지 추출 v3 (2026-05-09 fix).
+
+    전략:
+      1) og:image meta 태그 → 메인 이미지 1장 (가장 안정)
+      2) img[src*='cdn-optimized.imweb.me'] → 페이지 내 갤러리
+      3) 파일 ID (e.g. '1096ea89c0b80') 기준 dedup
+
+    차단:
+      - cdn.imweb.me/thumbnail/ (cdn-optimized 없음): 헤더/푸터 UI 이미지.
+        예: cfe04b2239733.png (사이트 로고), c90cf3f32a4af.png (모바일 로고).
+      - logo / icon / favicon / btn / blank.gif 키워드 포함 URL.
+
+    Returns:
+        최대 10장. 0장이면 호출자가 skip.
+    """
+    image_urls: list[str] = []
+    seen_ids: set[str] = set()
+
+    def _add(url: str) -> None:
+        if not url or not url.startswith("http"):
+            return
+        # UI 키워드 차단
+        lower = url.lower()
+        if any(k in lower for k in ["logo", "icon", "favicon", "/btn", "blank.gif"]):
+            return
+        fid = _file_id(url)
+        if not fid or fid in seen_ids:
+            return
+        seen_ids.add(fid)
+        image_urls.append(url)
+
+    # 1) og:image (메인 이미지 1장 보장)
+    try:
+        og_locator = page.locator('meta[property="og:image"]').first
+        if await og_locator.count() > 0:
+            og = await og_locator.get_attribute("content", timeout=500)
+            if og:
+                _add(og)
+    except Exception:
+        pass
+
+    # 2) cdn-optimized.imweb.me 패턴 — 실제 상품 이미지만 매칭
+    #    헤더 로고는 cdn.imweb.me (optimized 없음) 도메인이라 자동 차단.
+    try:
+        imgs = await page.locator(
+            "img[src*='cdn-optimized.imweb.me']"
+        ).all()
+        for img in imgs:
+            try:
+                src = await img.get_attribute("src", timeout=300)
+                if src:
+                    if src.startswith("//"):
+                        src = "https:" + src
+                    _add(src)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return image_urls[:10]
+
+
 async def extract_detail(
     page: Page, prd_no: str, idx: str, product_type: str
 ) -> Optional[dict[str, Any]]:
     """
     /{prd_no}/?idx={idx} detail 페이지 추출.
-
-    - title: <title> 텍스트 ('xxx : 스웨그키 공식 온라인 스토어' 형식 → 앞 부분)
-    - price: [class*='price'] 첫 번째
-    - images: img[src*='swagkey']
-
-    Returns:
-        UpsertRequest dict 또는 None (404/파싱 실패)
     """
     detail_url = f"{BASE}/{prd_no}/?idx={idx}"
     try:
         await page.goto(detail_url, wait_until="domcontentloaded", timeout=20000)
         await page.wait_for_timeout(2000)
 
-        # 1) title 추출 — '상품명 : 스웨그키 공식 온라인 스토어' 형식
+        # 1) title 추출
         title_raw = (await page.title() or "").strip()
-        # 404 회피
         if "404" in title_raw or "Not Found" in title_raw or not title_raw:
             logger.warning(f"  [Tier 3] 404 skip: {detail_url}")
             return None
-        # ' : 스웨그키 공식 온라인 스토어' suffix 제거
         if " : " in title_raw:
             name = title_raw.split(" : ")[0].strip()
         else:
             name = title_raw
-        # 사이트명만 그대로면 skip (h1 fallback 시도)
         if name == SITE_NAME_TITLE or name.startswith(SITE_NAME_TITLE):
             try:
                 h1 = (await page.locator("h1").first.text_content(timeout=500) or "").strip()
@@ -208,7 +256,6 @@ async def extract_detail(
                     txt = (
                         await page.locator(sel).first.text_content(timeout=500)
                     ) or ""
-                    # '29,000원' → 29000
                     digits = re.sub(r"[^\d]", "", txt)
                     if digits:
                         price = int(digits)
@@ -216,44 +263,8 @@ async def extract_detail(
             except Exception:
                 pass
 
-        # 3) images 수집 — img[src*='swagkey'] 또는 img[src*='/cdn/']
-        image_urls: list[str] = []
-        seen_imgs: set[str] = set()
-        img_selectors = [
-            "img[src*='swagkey']",
-            "img[src*='cdn']",
-            "img[src*='product']",
-            "img[src*='upload']",
-        ]
-        for sel in img_selectors:
-            try:
-                imgs = await page.locator(sel).all()
-                for img in imgs:
-                    src = await img.get_attribute("src", timeout=300)
-                    if not src:
-                        continue
-                    # 정규화
-                    if src.startswith("//"):
-                        src = "https:" + src
-                    elif src.startswith("/"):
-                        src = BASE + src
-                    elif not src.startswith("http"):
-                        continue
-                    # 중복 제거 + 흔한 logo/icon 제외
-                    if src in seen_imgs:
-                        continue
-                    if any(
-                        k in src.lower()
-                        for k in ["logo", "icon", "favicon", "btn", "blank.gif"]
-                    ):
-                        continue
-                    seen_imgs.add(src)
-                    image_urls.append(src)
-                if image_urls:
-                    break  # 한 selector 에서 충분히 찾았으면 stop
-            except Exception:
-                pass
-
+        # 3) images — v3 새 로직 (og:image + cdn-optimized.imweb.me)
+        image_urls = await extract_images(page)
         if not image_urls:
             logger.warning(f"  [Tier 3] image 0장 skip: {detail_url}")
             return None
@@ -261,7 +272,7 @@ async def extract_detail(
         return {
             "source_id": f"swagkey_{prd_no}_{idx}",
             "name": name[:200],
-            "image_urls": image_urls[:10],  # 최대 10장
+            "image_urls": image_urls,
             "price": price,
             "product_type": product_type,
             "detail_url": detail_url,
@@ -275,9 +286,6 @@ async def extract_detail(
 # ── Spring 적재 ──────────────────────────────────────────────────────────
 
 async def upsert_to_spring(products: list[dict[str, Any]]) -> dict[str, Any]:
-    """
-    /api/internal/crawler/upsert-batch 청크 분할 적재.
-    """
     if not products:
         return {
             "totalCreated": 0,
@@ -378,22 +386,10 @@ async def run_swagkey_crawl(
     headless: bool = True,
     delay_seconds: float = 1.5,
 ) -> dict[str, Any]:
-    """
-    스웨그키 2-tier 풀 크롤 메인.
-
-    Args:
-        sample_per_category: 카테고리당 최대 추출 상품 수 (테스트용 None=전체)
-        target_categories: 처리할 카테고리 이름 리스트 (None=전체)
-        max_brand_hubs: brand hub 최대 진입 수 (테스트용 None=전체)
-        headless: Playwright headless 모드
-        delay_seconds: detail 사이 sleep
-    """
     started_at = datetime.now()
     cats = target_categories or list(CATEGORIES.keys())
-    logger.info(f"[swagkey v2] 시작 — categories={cats}, sample={sample_per_category}")
+    logger.info(f"[swagkey v3] 시작 — categories={cats}, sample={sample_per_category}")
 
-    # ── 수집 단계 ────────────────────────────────────────────
-    # (prd_no, idx, product_type) 통합 set
     all_products: set[tuple[str, str, str]] = set()
     tier_stats = {
         "categories": {},
@@ -410,7 +406,7 @@ async def run_swagkey_crawl(
         )
         page = await context.new_page()
 
-        # ── Tier 1 + Tier 2 수집 ───────────────────────────────
+        # Tier 1 + Tier 2 수집
         for cat_name in cats:
             if cat_name not in CATEGORIES:
                 logger.warning(f"  unknown category {cat_name}, skip")
@@ -419,7 +415,6 @@ async def run_swagkey_crawl(
             cate_id = CATEGORIES[cat_name]["cate_id"]
             product_type = CATEGORIES[cat_name]["product_type"]
 
-            # Tier 1
             brand_hubs, direct_products = await collect_from_listing(page, cate_id)
 
             cat_stats = {
@@ -430,11 +425,9 @@ async def run_swagkey_crawl(
             tier_stats["brand_hubs_total"] += len(brand_hubs)
             tier_stats["direct_products_total"] += len(direct_products)
 
-            # 직접 상품들 add
             for prd_no, idx in direct_products:
                 all_products.add((prd_no, idx, product_type))
 
-            # Tier 2: brand hub 들 진입
             hubs_to_crawl = list(brand_hubs)
             if max_brand_hubs is not None:
                 hubs_to_crawl = hubs_to_crawl[:max_brand_hubs]
@@ -460,10 +453,9 @@ async def run_swagkey_crawl(
                 f"hub_products={cat_stats['hub_products']}"
             )
 
-        # ── Tier 3: detail 추출 ──────────────────────────────
+        # Tier 3: detail 추출
         product_list = list(all_products)
 
-        # 카테고리별 sample_per_category 적용
         if sample_per_category is not None:
             sampled: list[tuple[str, str, str]] = []
             seen_per_cat: dict[str, int] = {}
@@ -507,12 +499,11 @@ async def run_swagkey_crawl(
         f"[Tier 3] 완료 — 성공 {success}, 실패 {fail}, 총 이미지 {total_images}장"
     )
 
-    # ── 적재 단계 ────────────────────────────────────────────
     spring_summary = await upsert_to_spring(extracted)
     ended_at = datetime.now()
 
     return {
-        "mode": "swagkey_2tier_crawl_v2",
+        "mode": "swagkey_2tier_crawl_v3",
         "started_at": started_at.isoformat(),
         "ended_at": ended_at.isoformat(),
         "elapsed_seconds": (ended_at - started_at).total_seconds(),
