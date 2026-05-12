@@ -26,6 +26,10 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  *  - exceptionHandling() wired with custom handlers so unauthenticated requests
  *    return 401 (not Spring's default 403). 403 is reserved for "authenticated
  *    but role insufficient" cases (e.g. USER calling /api/admin/...).
+ *
+ * 7-A [9-2] (5/12) changes:
+ *  - /api/admin/audit-logs/** temporarily permitAll for viewer verification.
+ *    Removed once frontend ADMIN role guard (5-B Round 3) is in place.
  */
 @Configuration
 @EnableWebSecurity
@@ -67,6 +71,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/internal/**").permitAll()
 
                         // Admin
+                        // [TEMP] 7-A [9-2] AuditLog 뷰어 검증용 — 검증 후 제거하고 ADMIN role 가드로 통합
+                        .requestMatchers("/api/admin/audit-logs/**").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
                         // [TEMP] 7-A AuditLog @Aspect 검증용 — 검증 끝나면 제거하고 진짜 ADMIN 컨트롤러로 대체
