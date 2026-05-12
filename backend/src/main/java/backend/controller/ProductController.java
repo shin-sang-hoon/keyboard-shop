@@ -28,7 +28,7 @@ public class ProductController {
      *  - page (default: 0)            페이지 번호
      *  - size (default: 20)           페이지 크기
      *  - search (optional)            상품명 부분 일치 검색 (대소문자 무시)
-     *  - productType (optional)       enum: KEYBOARD/MOUSE/SWITCH_PART/ACCESSORY/NOISE/UNCLASSIFIED
+     *  - productType (optional)       enum: KEYBOARD/KEYCAP/SWITCH_PART/ACCESSORY/NOISE/UNCLASSIFIED (MOUSE deprecated)
      *  - sort (default: createdAt,desc)
      *
      * 응답: PagedResponse<ProductDto.Response>

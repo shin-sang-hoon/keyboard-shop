@@ -23,7 +23,7 @@ public class ProductDto {
         private String sourceId;
         private String glbUrl;
         private Product.ProductStatus status;
-        private Product.ProductType productType;   // 5-H D: 카테고리 분류 (KEYBOARD/MOUSE/SWITCH_PART/ACCESSORY/NOISE/UNCLASSIFIED)
+        private Product.ProductType productType;   // 5-H D: 카테고리 분류 (KEYBOARD/KEYCAP/SWITCH_PART/ACCESSORY/NOISE/UNCLASSIFIED (MOUSE deprecated))
     }
 
     @Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor

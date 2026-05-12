@@ -95,12 +95,25 @@ public class Product {
         ACTIVE, INACTIVE, SOLD_OUT
     }
 
+    /**
+     * 상품 타입 분류 (5-J 재편: 5/13).
+     *
+     * 도메인 학습 후 진화:
+     *  - swagkey.kr 표준 분석 결과 한국 기계식 키보드 시장은 Keyboards/Switches/Keycaps/Accessories 4축 구성
+     *  - 초기 5-G Step 1 에서 MOUSE 추가했으나 swagkey crawler 버그로 키캡들이 KEYBOARD 로 묻혀있었던 것 발견
+     *  - V7 SQL 로 KEYCAP 추가 + 키캡 93개 복원 + MOUSE ACTIVE → INACTIVE
+     *  - MOUSE enum 값은 DB INACTIVE 213 row 호환성 위해 유지 (deprecated)
+     */
     public enum ProductType {
-        KEYBOARD,      // 키보드 본체 (메인 상품) - 1880개
-        MOUSE,         // 마우스 - 186 + 24 = 210개
-        SWITCH_PART,   // 스위치 교체 부품 - 172개
-        ACCESSORY,     // 키캡/케이블/팜레스트 등 - 53개
-        NOISE,         // 크롤러 노이즈 - 미정 (Step 3에서 분류)
-        UNCLASSIFIED   // 미분류 (기본값) - 162개
+        KEYBOARD,      // 키보드 본체 (메인 상품) - ACTIVE 104
+        KEYCAP,        // 키캡 (염료승화/이중사출/PBT 등) - ACTIVE 93 (5-J NEW)
+        SWITCH_PART,   // 스위치 교체 부품 - ACTIVE 1
+        ACCESSORY,     // 케이블/팜레스트/데스크패드 등 - ACTIVE 24
+        NOISE,         // 크롤러 노이즈
+        UNCLASSIFIED,  // 미분류 (기본값)
+
+        /** @deprecated 5-J 재편으로 비활성. DB 호환성 위해 enum 값 유지. */
+        @Deprecated
+        MOUSE          // INACTIVE 214 (213 naver + 1 keychron M5)
     }
 }
