@@ -6,7 +6,7 @@
 
 const NOTICE_TITLES = [
   '5-B 인증 페이지 + 헤더 라운드 3-P 오픈 안내',
-  '5-G 카테고리 분류 자산 (KEYBOARD 130 / SWITCH_PART 162) 정리',
+  '5-J 카테고리 재편 (KEYBOARD 104 / KEYCAP 93 / SWITCH_PART 1 / ACCESSORY 24)',
   'Redis @Cacheable PageImpl 직렬화 fix 안내',
   '키크론 16종 · swagkey 114종 메인 페이지 노출',
   'Keychron GLB 542개 STEP→GLB 변환 완료',

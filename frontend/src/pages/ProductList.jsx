@@ -19,7 +19,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8081/api
 // productType → 한글 라벨 (페이지 상단 표시용)
 const CATEGORY_LABELS = {
   KEYBOARD: '키보드',
-  MOUSE: '마우스',
+  KEYCAP: '키캡',
   SWITCH_PART: '스위치 부품',
   ACCESSORY: '액세서리',
 };
@@ -230,7 +230,7 @@ function ProductCard({ product }) {
               background: '#71717a', color: '#fff', fontSize: 10,
               padding: '2px 6px', borderRadius: 4, fontWeight: 500,
             }}>
-              {product.productType === 'MOUSE' ? '마우스' :
+              {product.productType === 'KEYCAP' ? '키캡' :
                product.productType === 'SWITCH_PART' ? '부품' :
                product.productType === 'ACCESSORY' ? '액세서리' : ''}
             </span>

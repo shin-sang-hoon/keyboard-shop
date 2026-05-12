@@ -10,7 +10,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api
 // ─── 표시 라벨 매핑 ────────────────────────────────────────────────
 const PRODUCT_TYPE_LABELS = {
   KEYBOARD: '키보드',
-  MOUSE: '마우스',
+  KEYCAP: '키캡',
   SWITCH_PART: '스위치 부품',
   ACCESSORY: '액세서리',
   NOISE: '노이즈',

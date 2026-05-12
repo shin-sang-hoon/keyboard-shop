@@ -25,7 +25,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api
 const SECTIONS = [
   { title: 'NEW ARRIVALS', size: 6 },
   { title: 'KEYBOARD', productType: 'KEYBOARD', size: 6 },
-  { title: 'MOUSE', productType: 'MOUSE', size: 6 },
+  { title: 'KEYCAPS', productType: 'KEYCAP', size: 6 },
   { title: 'SWITCHES', productType: 'SWITCH_PART', size: 6 },
   { title: 'ACCESSORIES', productType: 'ACCESSORY', size: 6 },
 ];

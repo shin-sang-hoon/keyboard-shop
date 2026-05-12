@@ -1,10 +1,10 @@
 // frontend/src/components/Header.jsx
-// 5-B 라운드 3-N - 메뉴 최종 확정: Main / Keyboards / Mouse / Switches / Accessories
+// 5-J (5/13) — 메뉴 재편: Main / Keyboards / Keycaps / Switches / Accessories
 //
 // 변경 사항 (3-M → 3-N):
-//   - Keycaps 제거 → Switches 다시 추가
-//   - 최종 메뉴: Main / Keyboards / Mouse / Switches / Accessories
-//   - 모두 productType 으로 백엔드 연동 (Mouse=MOUSE, Switches=SWITCH_PART)
+//   - 5-J ProductType 재편: MOUSE @Deprecated → KEYCAP 신설
+//   - 최종 메뉴: Main / Keyboards / Keycaps / Switches / Accessories
+//   - 모두 productType 으로 백엔드 연동 (Keycaps=KEYCAP, Switches=SWITCH_PART)
 //
 // 누적 반영 (3-D ~ 3-N): SWACHRON 로고, 활성 알약 반전, 메인 페이지 오버레이 모드,
 // 메뉴 폰트 키움, swagkey 톤 글씨체, Search 시 우측 액션 dim, SearchOverlay swagkey 매칭,
@@ -29,7 +29,7 @@ const HOVER_CSS = `
 const NAV_ITEMS = [
   { label: 'Main',        to: '/',                                    exact: true },
   { label: 'Keyboards',   to: '/products?productType=KEYBOARD',       type: 'KEYBOARD' },
-  { label: 'Mouse',       to: '/products?productType=MOUSE',          type: 'MOUSE' },
+  { label: 'Keycaps',     to: '/products?productType=KEYCAP',         type: 'KEYCAP' },
   { label: 'Switches',    to: '/products?productType=SWITCH_PART',    type: 'SWITCH_PART' },
   { label: 'Accessories', to: '/products?productType=ACCESSORY',      type: 'ACCESSORY' },
 ];
