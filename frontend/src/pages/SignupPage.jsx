@@ -7,6 +7,10 @@
 // - 409 Conflict: 이메일 중복 메시지 표시
 // - 클라이언트측 검증: 비번 4자 이상, 비번 확인 일치
 // - 이메일 중복 사전 체크 API는 만들지 않음 (서버 응답이 단일 진실 공급원)
+//
+// 5-B fix (5/12): 사용자가 인풋 수정하면 이전 error 박스 자동으로 사라짐.
+// 이전엔 한 번 실패 후 이메일 바꿔 입력해도 빨간 박스가 그대로 남아있어서
+// 두 번째 시도가 막힌 것처럼 보였음. 이제 입력 변경 = 새 시도 의도로 간주.
 
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -33,6 +37,15 @@ export default function SignupPage() {
     name.trim() &&
     !submitting;
 
+  // 5-B fix: 인풋 변경 시 error 도 같이 비움.
+  // 한 번 실패 후 사용자가 값을 고치는 = 새 시도 의도라고 간주.
+  function clearErrorOn(setter) {
+    return (e) => {
+      if (error) setError('');
+      setter(e.target.value);
+    };
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     if (!canSubmit) return;
@@ -50,12 +63,14 @@ export default function SignupPage() {
       const status = err?.response?.status;
       const msg = err?.response?.data?.message;
 
+      // 백엔드가 영어 메시지 ("Email already in use") 를 보내도
+      // 한국어 우선. status 가 결정적 단서니까 그걸로 분기.
       if (status === 409) {
-        setError(msg || '이미 사용 중인 이메일입니다.');
+        setError('이미 사용 중인 이메일입니다.');
+      } else if (status === 400) {
+        setError(msg || '입력값을 확인해 주세요.');
       } else {
-        setError(
-          msg || '회원가입 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.'
-        );
+        setError('회원가입 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.');
       }
     } finally {
       setSubmitting(false);
@@ -75,7 +90,7 @@ export default function SignupPage() {
               type="email"
               autoComplete="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={clearErrorOn(setEmail)}
               required
               style={S.input}
               placeholder="you@example.com"
@@ -88,7 +103,7 @@ export default function SignupPage() {
               type="text"
               autoComplete="name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={clearErrorOn(setName)}
               required
               maxLength={50}
               style={S.input}
@@ -102,7 +117,7 @@ export default function SignupPage() {
               type="password"
               autoComplete="new-password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={clearErrorOn(setPassword)}
               required
               minLength={4}
               style={S.input}
@@ -116,7 +131,7 @@ export default function SignupPage() {
               type="password"
               autoComplete="new-password"
               value={passwordConfirm}
-              onChange={(e) => setPasswordConfirm(e.target.value)}
+              onChange={clearErrorOn(setPasswordConfirm)}
               required
               style={{
                 ...S.input,

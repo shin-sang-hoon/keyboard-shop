@@ -3,12 +3,14 @@ package backend.exception;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.catalina.connector.ClientAbortException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.stream.Collectors;
@@ -20,6 +22,7 @@ import java.util.stream.Collectors;
  * 5-G 마무리 시점 (4/27) 추가 — MethodArgumentTypeMismatchException.
  * 5-H A6 (5/3) 추가 — BusinessException (notFound/forbidden/badRequest/conflict).
  * 7-A (5/11) 추가 — Exception catch-all (RuntimeException → 401 잘못 반환 → 500 정정).
+ * 5-B fix (5/12) 추가 — Client abort (연결 끊김) 분리 처리 (운영 로그 노이즈 분리).
  */
 @Slf4j
 @RestControllerAdvice
@@ -77,6 +80,50 @@ public class GlobalExceptionHandler {
                         e.getStatus().value(),
                         e.getStatus().getReasonPhrase(),
                         e.getMessage()));
+    }
+
+    /**
+     * 클라이언트 연결 끊김 (Tomcat ClientAbortException) — 운영 로그 노이즈 분리.
+     *
+     * Tomcat 이 직접 던지는 ClientAbortException 타입을 잡음.
+     * 일부 케이스 (래핑되지 않은 raw IOException) 는 아래 handleIOException 에서 처리.
+     */
+    @ExceptionHandler(ClientAbortException.class)
+    public void handleClientAbort(ClientAbortException e) {
+        log.warn("Client aborted connection (ClientAbortException): {}", e.getMessage());
+    }
+
+    /**
+     * IOException 중 클라이언트 연결 끊김으로 추정되는 케이스 — WARN 로 분리.
+     *
+     * 배경 (5-B 검증 중 발견, 5/12):
+     *  - 로그인 200 OK 후 클라이언트가 응답 받기 전 연결 종료 시
+     *    Tomcat 버전에 따라 ClientAbortException 으로 래핑 안 되고
+     *    raw IOException 으로 던져지는 케이스 있음.
+     *  - 메시지에 "failed to flush" / "Connection reset" 등 패턴으로 식별.
+     *  - 이전엔 catch-all 에서 잡혀 ERROR 로그 + 풀 스택트레이스 → 운영 로그 노이즈.
+     *
+     * 처리 방식:
+     *  - 메시지 패턴 검사로 클라이언트 끊김 판별 → WARN
+     *  - 다른 IOException 은 catch-all 로 떨어져 500 처리
+     */
+    @ExceptionHandler(IOException.class)
+    public ResponseEntity<ErrorResponse> handleIOException(IOException e) {
+        String msg = e.getMessage();
+        if (msg != null && (msg.contains("failed to flush")
+                || msg.contains("Broken pipe")
+                || msg.contains("Connection reset"))) {
+            // 클라이언트 끊김 — WARN 로만, 응답 본문 의미 없음
+            log.warn("Client aborted connection (IOException): {}", msg);
+            return null;
+        }
+        // 진짜 서버측 IO 오류 — 500
+        log.error("Unexpected IOException: {}", msg, e);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(new ErrorResponse(
+                        HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                        "Internal Server Error",
+                        "An I/O error occurred. Please try again later."));
     }
 
     /**
