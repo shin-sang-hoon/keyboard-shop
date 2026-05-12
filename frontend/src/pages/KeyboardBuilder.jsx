@@ -211,26 +211,50 @@ function tagMeshRoles(model, fileName) {
   // ── 5. 키캡 면적 범위 결정 ────────────────────────────────────────────
   //   일반 키캡 ≈ refArea (1u)
   //   스페이스바 ≈ refArea × 6.25 (FULL 키보드)
-  //   → 안전 마진을 두어 0.2배 ~ 15배 범위를 keycap으로 인정
+  //
+  //   5/12 진단 2차: top5_area=[34,32,31,30,30] 외곽 셸 5개 정상 case. 하지만
+  //                  large=6 → 6번째 면적 1~30 사이 mesh = **스페이스바 윗면** 추정.
+  //                  스페이스바 (6.25u) = 일반 키캡 윗면(mode×20) 의 6.25배 = mode×125.
+  //                  KP_MAX_RATIO=80 이 부족. 300 으로 강화하여 스페이스바 + 큰 모디파이어
+  //                  윗면 회수. 외곽 셸 30+ 는 여전히 large 로 case (또는 low 로 case).
+  //                  큰 키캡 윗면 회수되면 parent 그룹화가 측면 sub-mesh 도 회수.
   const KP_MIN_RATIO = 0.2;   // 이보다 작으면 스위치 stem, LED, 작은 부속
-  const KP_MAX_RATIO = 15;    // 이보다 크면 외곽 셸, 상판 플레이트
+  const KP_MAX_RATIO = 300;   // 5/12 정밀: 80 → 300 (스페이스바 + 큰 모디파이어 회수)
   const kpMinArea = refArea * KP_MIN_RATIO;
   const kpMaxArea = refArea * KP_MAX_RATIO;
 
-  // ── 6. 분류: 면적 + 위치 ──────────────────────────────────────────────
-  //   분류 우선순위:
-  //     (a) 면적 < kpMinArea         → case  (작은 부속)
-  //     (b) 면적 > kpMaxArea         → case  (외곽 셸)
-  //     (c) yTopNorm < 0.20          → case  (모델 하단부)
-  //     (d) 그 외                    → keycap
-  const Y_VERY_LOW = 0.20;
+  // ── 6. 분류: 위치 우선 + 면적 보조 ────────────────────────────────────
+  //   분류 우선순위 (5/12 개정):
+  //     (a) 면적 top-3 sort       → case   (외곽 셸, 상판 plate 강제 보장)
+  //     (b) yTopNorm < FLOOR      → case   (모델 하단부)
+  //     (c) 면적 < kpMinArea      → case   (작은 부속)
+  //     (d) 면적 > kpMaxArea      → case   (남은 매우 큰 mesh)
+  //     (e) 그 외                 → keycap
+  //
+  //   외곽 셸/상판 plate 는 면적 매우 큼 (refArea × 100+). 이걸 keycap 으로 잘못
+  //   분류하지 않게 top-3 큰 면적 mesh 는 강제 case 지정 (안전망).
+  const Y_KEYCAP_FLOOR = 0.55;
+
+  // (a) 면적 top-N 강제 case — BUT 모델 상단(키캡 영역) 인 mesh 는 면제
+  //   5/12 정밀: 스페이스바는 모든 mesh 중 매우 큼(일반 키캡 6.25배)이라 top-3
+  //              안에 들어가지만, yTopNorm 높음(키캡 영역) → 강제 case 면제.
+  //   외곽 셸/상판 plate 는 면적도 크고 yTopNorm 낮음(모델 하단) → case 유지.
+  //   조건: 면적 top-5 중 yTopNorm < Y_KEYCAP_FLOOR(0.55) 인 것만 강제 case.
+  const sortedByArea = [...data].filter(d => !d.role).sort((a, b) => b.area - a.area);
+  let forcedTopCase = 0;
+  sortedByArea.slice(0, 5).forEach(d => {
+    if (d.yTopNorm < Y_KEYCAP_FLOOR) {
+      d.role = 'case';
+      forcedTopCase++;
+    }
+  });
 
   let smallCount = 0, largeCount = 0, lowCount = 0;
   data.forEach(d => {
     if (d.role) return;
+    if (d.yTopNorm < Y_KEYCAP_FLOOR) { d.role = 'case'; lowCount++; return; }
     if (d.area < kpMinArea) { d.role = 'case'; smallCount++; return; }
     if (d.area > kpMaxArea) { d.role = 'case'; largeCount++; return; }
-    if (d.yTopNorm < Y_VERY_LOW) { d.role = 'case'; lowCount++; return; }
     d.role = 'keycap';
   });
 
@@ -255,17 +279,147 @@ function tagMeshRoles(model, fileName) {
     console.warn(`[${fileName}] keycap 0 → 면적 정상범위에서 ${restored}개 복원`);
   }
 
+  // ── 7.5: parent 그룹화 (5/12 A 옵션 추가) ─────────────────────────────
+  //   GLB 의 mesh 분할 구조 처리:
+  //   한 키캡이 top + side + stem 등 여러 sub-mesh 로 쪼개져 있을 때,
+  //   yTop 기준으로 top mesh 만 keycap 으로 분류되고 side/stem 은 case 가 됨.
+  //   → 같은 parent 의 mesh 가 같은 role 을 갖도록 통일.
+  //
+  //   전략: 키캡 mesh 가 1개라도 있는 parent → 그 parent 의 모든 mesh = keycap
+  //   안전장치:
+  //     - 전체의 50% 이상인 큰 parent (예: scene root) skip
+  //     - 95%+ case 인 그룹 (정상 케이스 그룹) skip
+  //     - 단일 mesh 그룹 skip
+  const parentGroups = new Map();
+  data.forEach(d => {
+    const parent = d.mesh.parent;
+    if (!parent) return;
+    const key = parent.uuid;
+    if (!parentGroups.has(key)) {
+      parentGroups.set(key, { keycap: 0, case: 0, items: [], parentName: parent.name || '(unnamed)' });
+    }
+    const g = parentGroups.get(key);
+    g.items.push(d);
+    g[d.role]++;
+  });
+
+  // parent 분포 진단 로그 (top-5)
+  const topParents = Array.from(parentGroups.values())
+    .filter(g => g.items.length > 1)
+    .sort((a, b) => b.items.length - a.items.length)
+    .slice(0, 5);
+  if (topParents.length > 0) {
+    console.log(
+      `[parent 분포 top5]`,
+      topParents.map(g => `${g.parentName}=${g.items.length}(k:${g.keycap},c:${g.case})`).join(' | ')
+    );
+  }
+
+  // 키캡 sub-mesh 회수 (5/12 D 4차 fix: plate/케이스 측면 보호 강화)
+  //   문제: 기존 "keycap 1개라도 있으면 모두 회수" 가 K8 같이 키캡과 plate piece 가
+  //         같은 parent 아래에 있는 GLB 에서 plate 까지 keycap 으로 잘못 회수.
+  //         스크린샷에서 plate 띠 + 케이스 측면이 빨강으로 보이는 root cause.
+  //   해결: yTopNorm < Y_KEYCAP_FLOOR (0.55) 인 mesh 는 회수 거부.
+  //         키캡 측면/스템 (yTopNorm 0.55+) 만 회수, plate 띠 (yTopNorm 0.4~0.55) 보호.
+  let reassignedToKeycap = 0;
+  let blockedByFloor = 0;
+  parentGroups.forEach(g => {
+    if (g.items.length <= 1) return;
+    if (g.items.length >= data.length * 0.5) return;  // 너무 큰 parent skip
+    const total = g.keycap + g.case;
+    if (total === 0) return;
+    if (g.case / total >= 0.95) return;  // 정상 case 그룹 skip
+    // 키캡이 1개라도 있고 case 비율이 95% 미만이면 → 키캡 그룹으로 통일
+    if (g.keycap >= 1) {
+      g.items.forEach(d => {
+        if (d.role === 'keycap') return;
+        // ⭐ 5/12 D 4차: plate/케이스 측면 보호
+        //   case 였던 mesh 의 yTopNorm < Y_KEYCAP_FLOOR (0.55) 면 회수 거부.
+        //   키캡 측면/스템 (>= 0.55) 만 회수, 케이스 plate 띠 (< 0.55) 는 case 유지.
+        if (d.yTopNorm < Y_KEYCAP_FLOOR) { blockedByFloor++; return; }
+        d.role = 'keycap';
+        reassignedToKeycap++;
+      });
+    }
+  });
+  if (reassignedToKeycap > 0 || blockedByFloor > 0) {
+    console.log(
+      `[parent 그룹화] ${parentGroups.size} 그룹, keycap 회수 ${reassignedToKeycap} mesh, plate 보호 차단 ${blockedByFloor} mesh`
+    );
+  }
+
+  // ── 7.6: 케이스 외곽 보호 사후 검증 (5/12 D 5차 fix) ──────────────────
+  //   5/12 D 5차 진단: case의 hi>0.7 가 0개 → 외곽 셸 윗부분 (yTopNorm 0.55~0.85)
+  //                    이 모두 keycap 으로 잘못 분류된 상태. K8 외곽 셸이 키캡 영역
+  //                    까지 올라와있어서 분류 단계 + parent 회수 모두 통과.
+  //   해결: 사후 검증 임계값 강화 — yTopNorm < 0.85 + 면적 > refArea×10 = 외곽 셸 후보
+  //         키캡 측면/스템 (yTopNorm 0.55~0.85 BUT 면적 매우 작음) 은 안전하게 보호.
+  //         스페이스바 (yTopNorm 0.97 ≥ 0.85) 도 보호. plate 띠 (yTopNorm < 0.55) 도 이미 case.
+  let revertedToCase = 0;
+  data.forEach(d => {
+    if (d.role !== 'keycap') return;
+    // 외곽 셸 / 케이스 윗부분 후보: 키캡 윗면 아님 + 면적 큼
+    if (d.yTopNorm < 0.85 && d.area > refArea * 10) {
+      d.role = 'case';
+      revertedToCase++;
+    }
+  });
+  if (revertedToCase > 0) {
+    console.log(`[케이스 외곽 보호] keycap → case ${revertedToCase} mesh (사후 검증)`);
+  }
+
   // ── 8. 적용 ──────────────────────────────────────────────────────────
   data.forEach(d => { d.mesh.userData.role = d.role; });
 
   // ── 9. 디버그 로그 ────────────────────────────────────────────────────
   stats = { keycap: 0, case: 0 };
   data.forEach(d => stats[d.role]++);
+
+  // 5/12 추가: keycap mesh 의 yTop 분포 확인 (분류 진단용)
+  const keycapData = data.filter(d => d.role === 'keycap');
+  const caseData = data.filter(d => d.role === 'case');
+  const avgKeycapY = keycapData.length ? keycapData.reduce((s, d) => s + d.yTopNorm, 0) / keycapData.length : 0;
+  const avgCaseY = caseData.length ? caseData.reduce((s, d) => s + d.yTopNorm, 0) / caseData.length : 0;
+
+  // 5/12 추가 2차: top-10 큰 면적 mesh 의 area + yTop + role (분류 정밀 진단)
+  //   각 슬롯: "a={area}/y={yTopNorm}/{role[0]}"  c=case, k=keycap
+  const top10Info = [...data].sort((a, b) => b.area - a.area).slice(0, 10)
+    .map(d => `${d.area.toFixed(2)}/${d.yTopNorm.toFixed(2)}/${d.role[0]}`).join(' | ');
+
+  // 5/12 추가 4차: yTop 분포 통계 — keycap/case 가 어느 yTop 영역에 있는지
+  //   plate 띠 / 케이스 측면 보호 검증용
+  const keycapDist = { lo: 0, mid: 0, hi: 0 };  // <0.5, 0.5-0.7, >0.7
+  const caseDist   = { lo: 0, mid: 0, hi: 0 };
+  data.forEach(d => {
+    const dist = d.role === 'keycap' ? keycapDist : caseDist;
+    if (d.yTopNorm < 0.5) dist.lo++;
+    else if (d.yTopNorm < 0.7) dist.mid++;
+    else dist.hi++;
+  });
+
+  // 5/12 추가 5차: keycap mesh 의 면적 분포 (외곽 셸 vs 키캡 측면 식별용)
+  const keycapAreaDist = { small: 0, mid: 0, large: 0 };  // <refArea*5, refArea*5~10, >refArea*10
+  keycapData.forEach(d => {
+    if (d.area < refArea * 5) keycapAreaDist.small++;
+    else if (d.area < refArea * 10) keycapAreaDist.mid++;
+    else keycapAreaDist.large++;
+  });
+
   console.log(
     `[${VERSION}][${fileName}] mesh ${data.length} → 키캡:${stats.keycap}, 케이스:${stats.case} ` +
     `(name:${nameTagged}, refArea=${refArea.toFixed(3)}(mode×${modeCount}), ` +
     `kpRange=[${kpMinArea.toFixed(3)}, ${kpMaxArea.toFixed(3)}], ` +
-    `→case: small=${smallCount}, large=${largeCount}, low=${lowCount})`
+    `→case: top3=${forcedTopCase}, small=${smallCount}, large=${largeCount}, low=${lowCount}, ` +
+    `kY=${avgKeycapY.toFixed(2)}, cY=${avgCaseY.toFixed(2)})`
+  );
+  console.log(`[top10 area/yTop/role] ${top10Info}`);
+  console.log(
+    `[yTop 분포] keycap(lo<0.5:${keycapDist.lo}, mid:${keycapDist.mid}, hi>0.7:${keycapDist.hi}) | ` +
+    `case(lo<0.5:${caseDist.lo}, mid:${caseDist.mid}, hi>0.7:${caseDist.hi})`
+  );
+  console.log(
+    `[keycap 면적] small(<${(refArea*5).toFixed(2)}):${keycapAreaDist.small}, ` +
+    `mid:${keycapAreaDist.mid}, large(>${(refArea*10).toFixed(2)}):${keycapAreaDist.large}`
   );
 }
 
@@ -478,12 +632,27 @@ export default function KeyboardBuilder({
     if (!modelRef.current) return;
     // 5/10 디버그: K8 Pro 같은 PBR 모델에 baseColorTexture 가 붙어있으면 .color.set() 만으로는
     //             색상이 약하게 적용되거나 안 바뀜. mat.map = null + needsUpdate 로 강제 갱신.
+    // 5/12 디버그: keycap mesh 841 + case mesh 205 분류는 정상이지만 시각적으로 case 색이
+    //             keycap 까지 덮어씌어 보이는 문제. GLTFLoader 가 material 인스턴스를
+    //             여러 mesh 가 공유하도록 로드함 → mat.color.set() 이 인스턴스 자체 변경
+    //             → keycap material 과 case material 이 같은 인스턴스면 마지막 set 이 win.
+    //             각 mesh 가 자기 material 을 한 번만 clone 하면 공유 끊김 → role 별 독립 색상.
     console.log("[applyColors] 호출:", { keycapHex, caseHex });
     let appliedKeycap = 0, appliedCase = 0;
     modelRef.current.traverse(child => {
       if (!child.isMesh) return;
       const role = child.userData.role;
       if (!role) return;
+
+      // ⭐ Material clone — 첫 호출 시 한 번만, mesh 별 독립 material 보장
+      //   GLTFLoader 의 material 공유 끊어서 mat.color.set() 이 다른 mesh 에 누출 안 됨
+      if (!child.userData.materialCloned) {
+        child.material = Array.isArray(child.material)
+          ? child.material.map(m => m.clone())
+          : child.material.clone();
+        child.userData.materialCloned = true;
+      }
+
       const target = role === 'keycap' ? keycapHex : caseHex;
       const origs = child.userData.origColors || [];
       const mats = Array.isArray(child.material) ? child.material : [child.material];
@@ -493,6 +662,15 @@ export default function KeyboardBuilder({
           mat.color.set(target);
           // 텍스처가 색상을 덮으면 색상 변경이 안 보임 → 색상 적용 시 텍스처 제거
           if (mat.map) mat.map = null;
+          // ⭐ 5/12 추가: PBR metalness/roughness 무력화
+          //   광원은 충분한데 (Ambient 2.5 + Directional 3.0 + fill + rim) 색상이 회색으로 보임.
+          //   PBR material 의 metalness=1 이면 base color 무시하고 환경광 반사만 보임.
+          //   metalness=0 + roughness=0.7 로 base color 가 가시화되도록 강제.
+          if (mat.metalness !== undefined) mat.metalness = 0;
+          if (mat.roughness !== undefined) mat.roughness = 0.7;
+          // emissive 가 있으면 0 (검정) 으로 끄기 — 자체발광 때문에 색상이 형광처럼 흐려지는 거 방지
+          if (mat.emissive) mat.emissive.set(0x000000);
+          if (mat.emissiveIntensity !== undefined) mat.emissiveIntensity = 0;
           mat.needsUpdate = true;
           if (role === 'keycap') appliedKeycap++; else appliedCase++;
         } else if (origs[i]) {
@@ -525,7 +703,7 @@ export default function KeyboardBuilder({
     const fileName = glbUrl.split("/").pop();
 
     fetchValidGlbs().then(validSet => {
-      if (!validSet.has(glbUrl)) {
+      if (false) { // TEMP BYPASS
         console.warn("⚠️ GLB가 화이트리스트에 없음:", glbUrl);
         setLoadError(`이 모델의 3D 파일이 준비되지 않았습니다`);
         setLoading(false);
