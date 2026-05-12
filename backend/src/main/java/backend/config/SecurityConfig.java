@@ -30,6 +30,10 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  * 7-A [9-2] (5/12) changes:
  *  - /api/admin/audit-logs/** temporarily permitAll for viewer verification.
  *    Removed once frontend ADMIN role guard (5-B Round 3) is in place.
+ *
+ * Phase 7 WebSocket (5/12) changes:
+ *  - /ws/** permitAll for STOMP handshake. In production (Phase 8) a STOMP
+ *    ChannelInterceptor should validate JWT on CONNECT frames instead.
  */
 @Configuration
 @EnableWebSecurity
@@ -70,12 +74,17 @@ public class SecurityConfig {
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/internal/**").permitAll()
 
+                        // [Phase 7 WebSocket · 5/12] STOMP endpoint - public handshake.
+                        // SockJS info endpoint also under /ws/info, covered by /ws/** pattern.
+                        // Phase 8: replace with STOMP ChannelInterceptor for JWT on CONNECT.
+                        .requestMatchers("/ws/**").permitAll()
+
                         // Admin
-                        // [TEMP] 7-A [9-2] AuditLog 뷰어 검증용 — 검증 후 제거하고 ADMIN role 가드로 통합
+                        // [TEMP] 7-A [9-2] AuditLog viewer - removed once frontend ADMIN guard is in
                         .requestMatchers("/api/admin/audit-logs/**").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
-                        // [TEMP] 7-A AuditLog @Aspect 검증용 — 검증 끝나면 제거하고 진짜 ADMIN 컨트롤러로 대체
+                        // [TEMP] 7-A AuditLog @Aspect verification endpoint
                         .requestMatchers("/api/test-audit/**").permitAll()
 
                         // Reviews (5-H B2) - CUD authenticated
