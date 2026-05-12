@@ -351,7 +351,7 @@ export default function ProductDetail() {
   }
 
   // ─── 메인 렌더 ────────────────────────────────────────────
-  const hasGlb = Boolean(product.glbUrl);
+  const hasGlb = Boolean(product.glbUrl) && product.productType === 'KEYBOARD';
 
   return (
     <div style={S.page}>

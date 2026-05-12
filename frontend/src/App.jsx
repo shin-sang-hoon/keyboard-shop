@@ -1,22 +1,39 @@
 // frontend/src/App.jsx
 //
-// 5-B Step 3 - 인증 페이지 실제 구현으로 교체.
+// 5-B 라운드 Day 2 (2026-05-09) - KakaoCallbackPage 라우트 추가.
 //
-// 변경:
-//  - /login, /signup → PlaceholderPage → LoginPage / SignupPage (LIGHT 톤)
-//  - /mypage → PlaceholderPage → ProtectedRoute로 감싼 MyPage
-//  - /cart 는 비로그인도 보게 둠 (가입 유도용, 5-D에서 본격 구현 시 재검토)
+// Day 1 → Day 2 변경:
+//   - import KakaoCallbackPage 추가
+//   - /auth/kakao/success 라우트 추가
+//   - CHROME_HIDDEN_PATHS 에 '/auth' 추가 (콜백 페이지에서 헤더/푸터 숨김 - 잠깐 거치는 페이지)
+//
+// 그 외 라우트는 라운드 3-Q 그대로 유지.
 
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
+import HomePage from './pages/HomePage';
 import ProductList from './pages/ProductList';
 import ProductDetail from './pages/ProductDetail';
 import KeyboardBuilder from './pages/KeyboardBuilder';
+import KeyboardBuilderRoute from './pages/KeyboardBuilderRoute';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import MyPage from './pages/MyPage';
 import PlaceholderPage from './pages/PlaceholderPage';
+import NoticeDetailPage from './pages/NoticeDetailPage';
+import KakaoCallbackPage from './pages/KakaoCallbackPage';
 import ProtectedRoute from './components/ProtectedRoute';
+import Header from './components/Header';
+import Footer from './components/Footer';
 import { useCartStore } from './stores/cartStore';
+
+// '/auth' 추가: 카카오 콜백 페이지는 잠깐 거치는 페이지라 헤더/푸터 노출 불필요.
+const CHROME_HIDDEN_PATHS = ['/builder', '/login', '/signup', '/auth'];
+
+function ConditionalChrome({ children }) {
+  const location = useLocation();
+  const hide = CHROME_HIDDEN_PATHS.some((p) => location.pathname.startsWith(p));
+  return hide ? null : children;
+}
 
 // === Cart placeholder (5-D에서 본격 구현) ===
 function CartPlaceholder() {
@@ -38,14 +55,20 @@ function CartPlaceholder() {
 function App() {
   return (
     <BrowserRouter>
+      <ConditionalChrome><Header /></ConditionalChrome>
       <Routes>
-        {/* 메인 */}
-        <Route path="/" element={<Navigate to="/products" replace />} />
+        {/* 메인 - 5-B 라운드 3-D 신규 HomePage */}
+        <Route path="/" element={<HomePage />} />
         <Route path="/products" element={<ProductList />} />
         <Route path="/products/:id" element={<ProductDetail />} />
-        <Route path="/builder/:id" element={<KeyboardBuilder />} />
+        <Route path="/builder/:id" element={<KeyboardBuilderRoute />} />
+        {/* /builder/:id 는 KeyboardBuilderRoute wrapper 사용 — useParams + fetch 후 props 주입.
+            KeyboardBuilder 자체는 props 인터페이스 보존 (다른 사용처 호환). 5/10 fix. */}
 
-        {/* 5-B 인증/회원 - 본격 구현 */}
+        {/* 공지사항 상세 - 5-B 라운드 3-Q 신규 */}
+        <Route path="/notices/:id" element={<NoticeDetailPage />} />
+
+        {/* 5-B 인증/회원 */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route
@@ -57,8 +80,35 @@ function App() {
           }
         />
 
+        {/* 5-B Day 2 신규 - 카카오 OAuth 콜백 */}
+        <Route path="/auth/kakao/success" element={<KakaoCallbackPage />} />
+
         {/* 5-D 장바구니/주문 - placeholder */}
         <Route path="/cart" element={<CartPlaceholder />} />
+
+        {/* 약관 - placeholder (Phase 8 배포 시 실제 콘텐츠) */}
+        <Route
+          path="/terms"
+          element={
+            <PlaceholderPage
+              title="이용약관"
+              subtitle="실제 운영 시 법무 검토 후 게재 예정"
+              plannedPhase="Phase 8 배포"
+              links={[{ to: '/', label: '메인으로' }]}
+            />
+          }
+        />
+        <Route
+          path="/privacy"
+          element={
+            <PlaceholderPage
+              title="개인정보처리방침"
+              subtitle="실제 운영 시 법무 검토 후 게재 예정"
+              plannedPhase="Phase 8 배포"
+              links={[{ to: '/', label: '메인으로' }]}
+            />
+          }
+        />
 
         {/* 404 */}
         <Route
@@ -67,11 +117,12 @@ function App() {
             <PlaceholderPage
               title="404"
               subtitle="요청하신 페이지를 찾을 수 없어요"
-              links={[{ to: '/products', label: '상품 목록으로' }]}
+              links={[{ to: '/', label: '메인으로' }]}
             />
           }
         />
       </Routes>
+      <ConditionalChrome><Footer /></ConditionalChrome>
     </BrowserRouter>
   );
 }

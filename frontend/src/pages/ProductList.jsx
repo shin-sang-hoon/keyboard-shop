@@ -1,19 +1,28 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
-import { Link } from 'react-router-dom';
+// frontend/src/pages/ProductList.jsx
+//
+// 5-B 라운드 3 - 카테고리 탭 헤더로 통합. 검색 입력창도 제거 (헤더의 Search 오버레이 사용).
+//
+// 변경:
+//   - URL 쿼리스트링이 single source of truth
+//     - ?productType=KEYBOARD → 헤더 카테고리 탭 클릭으로 진입
+//     - ?search=keyword       → 헤더 Search 오버레이로 진입
+//   - useSearchParams로 URL 읽고, useEffect로 백엔드 호출
+//   - 페이지 상단에 검색 키워드 표시 + × 버튼으로 검색 해제
+
+import { useEffect, useState, useRef } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8081/api';
 
-// ─── 카테고리 탭 정의 ────────────────────────────────────────────────────────
-// productType=null 은 "All" (백엔드 필터 미적용)
-const CATEGORY_TABS = [
-  { value: null, label: 'All' },
-  { value: 'KEYBOARD', label: '키보드' },
-  { value: 'MOUSE', label: '마우스' },
-  { value: 'SWITCH_PART', label: '스위치 부품' },
-  { value: 'ACCESSORY', label: '액세서리' },
-];
+// productType → 한글 라벨 (페이지 상단 표시용)
+const CATEGORY_LABELS = {
+  KEYBOARD: '키보드',
+  MOUSE: '마우스',
+  SWITCH_PART: '스위치 부품',
+  ACCESSORY: '액세서리',
+};
 
 // ─── 3D 썸네일 캐시 + 동시 로드 제한 ─────────────────────────────────────────
 const thumbCache = new Map();
@@ -151,7 +160,7 @@ function ProductCard({ product }) {
   }, [product.glbUrl]);
 
   // 표시 우선순위: 3D 썸네일 > image_url > placeholder
-  const hasGlb = Boolean(product.glbUrl);
+  const hasGlb = Boolean(product.glbUrl) && product.productType === 'KEYBOARD';
   const showImage = !hasGlb && product.imageUrl && !imgError;
 
   return (
@@ -246,42 +255,6 @@ function ProductCard({ product }) {
   );
 }
 
-// ─── 카테고리 탭 컴포넌트 ────────────────────────────────────────────────────
-function CategoryTabs({ active, onChange }) {
-  return (
-    <div style={{
-      display: 'flex', gap: 8, marginBottom: 24,
-      borderBottom: '1px solid #e4e4e7', paddingBottom: 0,
-      overflowX: 'auto',
-    }}>
-      {CATEGORY_TABS.map((tab) => {
-        const isActive = active === tab.value;
-        return (
-          <button
-            key={tab.label}
-            onClick={() => onChange(tab.value)}
-            style={{
-              padding: '10px 20px',
-              fontSize: 14,
-              fontWeight: isActive ? 600 : 500,
-              color: isActive ? '#6366f1' : '#71717a',
-              background: 'transparent',
-              border: 'none',
-              borderBottom: isActive ? '2px solid #6366f1' : '2px solid transparent',
-              cursor: 'pointer',
-              transition: 'all 0.15s',
-              whiteSpace: 'nowrap',
-              marginBottom: -1,
-            }}
-          >
-            {tab.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 // ─── 페이지네이션 컴포넌트 ───────────────────────────────────────────────────
 function Pagination({ page, totalPages, onChange }) {
   if (totalPages <= 1) return null;
@@ -363,29 +336,23 @@ function Pagination({ page, totalPages, onChange }) {
 const PAGE_SIZE = 24;
 
 export default function ProductList() {
+  // URL 쿼리스트링이 single source of truth.
+  // 헤더가 URL을 바꾸면 이 페이지가 그걸 읽어 백엔드 호출.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const productType = searchParams.get('productType') || null;
+  const urlSearch = searchParams.get('search') || '';
+
   const [products, setProducts] = useState([]);
   const [totalElements, setTotalElements] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [page, setPage] = useState(0);
-  const [productType, setProductType] = useState(null);
-  const [searchInput, setSearchInput] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // 검색 디바운스 (300ms)
-  useEffect(() => {
-    const handle = setTimeout(() => {
-      setSearchQuery(searchInput.trim());
-      setPage(0); // 검색 변경 시 첫 페이지로
-    }, 300);
-    return () => clearTimeout(handle);
-  }, [searchInput]);
-
-  // 탭 변경 시 첫 페이지로
+  // 카테고리/검색 변경 시 첫 페이지로
   useEffect(() => {
     setPage(0);
-  }, [productType]);
+  }, [productType, urlSearch]);
 
   // API 호출 (AbortController 로 race condition 방지)
   // React StrictMode dev 모드 이중 호출 + 빠른 탭/검색 전환 시
@@ -397,7 +364,7 @@ export default function ProductList() {
     params.set('page', page);
     params.set('size', PAGE_SIZE);
     if (productType) params.set('productType', productType);
-    if (searchQuery) params.set('search', searchQuery);
+    if (urlSearch) params.set('search', urlSearch);
 
     const url = `${API_BASE}/products?${params.toString()}`;
 
@@ -428,30 +395,37 @@ export default function ProductList() {
       });
 
     return () => controller.abort();
-  }, [page, productType, searchQuery]);
+  }, [page, productType, urlSearch]);
+
+  const clearSearch = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('search');
+    setSearchParams(next);
+  };
 
   return (
     <div style={{ padding: 24, maxWidth: 1400, margin: '0 auto' }}>
       <h1 style={{ marginBottom: 8 }}>키보드 쇼핑몰</h1>
       <p style={{ color: '#71717a', marginBottom: 24, fontSize: 14 }}>
         총 {totalElements.toLocaleString()}개 상품
-        {productType && ` · ${CATEGORY_TABS.find((t) => t.value === productType)?.label}`}
-        {searchQuery && ` · "${searchQuery}" 검색`}
+        {productType && ` · ${CATEGORY_LABELS[productType] || productType}`}
+        {urlSearch && (
+          <>
+            {' · '}
+            "{urlSearch}" 검색
+            <button
+              onClick={clearSearch}
+              style={{
+                marginLeft: 8, padding: '2px 8px', fontSize: 12,
+                background: '#f4f4f5', border: '1px solid #d4d4d8',
+                borderRadius: 4, cursor: 'pointer',
+              }}
+            >
+              ×
+            </button>
+          </>
+        )}
       </p>
-
-      <input
-        type="text"
-        placeholder="상품 검색 (이름)"
-        value={searchInput}
-        onChange={(e) => setSearchInput(e.target.value)}
-        style={{
-          width: '100%', padding: '12px 16px', fontSize: 15,
-          marginBottom: 16, border: '1px solid #d4d4d8', borderRadius: 8,
-          boxSizing: 'border-box',
-        }}
-      />
-
-      <CategoryTabs active={productType} onChange={setProductType} />
 
       {error && (
         <div style={{
@@ -470,8 +444,8 @@ export default function ProductList() {
 
       {!loading && products.length === 0 && !error && (
         <div style={{ padding: 60, textAlign: 'center', color: '#71717a' }}>
-          {searchQuery ? `"${searchQuery}" 검색 결과가 없습니다.` :
-           productType ? `${CATEGORY_TABS.find((t) => t.value === productType)?.label} 카테고리에 상품이 없습니다.` :
+          {urlSearch ? `"${urlSearch}" 검색 결과가 없습니다.` :
+           productType ? `${CATEGORY_LABELS[productType] || productType} 카테고리에 상품이 없습니다.` :
            '표시할 상품이 없습니다.'}
         </div>
       )}
