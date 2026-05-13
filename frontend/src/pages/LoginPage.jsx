@@ -1,6 +1,7 @@
 // frontend/src/pages/LoginPage.jsx
 //
 // 5-B Day 2 (2026-05-09) - 카카오 로그인 활성화.
+// 5-B Round 3 (2026-05-13) - 회원가입 링크 /signup → /signup/type (가입 방식 선택 페이지).
 //
 // Day 1 → Day 2 변경:
 //   - "카카오로 시작하기 (준비 중)" disabled 버튼 → 활성화.
@@ -161,7 +162,7 @@ export default function LoginPage() {
 
         <div style={S.footer}>
           처음이신가요?{' '}
-          <Link to="/signup" style={S.link}>
+          <Link to="/signup/type" style={S.link}>
             회원가입
           </Link>
         </div>

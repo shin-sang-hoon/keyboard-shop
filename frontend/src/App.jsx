@@ -1,11 +1,11 @@
 // frontend/src/App.jsx
 //
 // 5-B 라운드 Day 2 (2026-05-09) - KakaoCallbackPage 라우트 추가.
-//
-// Day 1 → Day 2 변경:
-//   - import KakaoCallbackPage 추가
-//   - /auth/kakao/success 라우트 추가
-//   - CHROME_HIDDEN_PATHS 에 '/auth' 추가 (콜백 페이지에서 헤더/푸터 숨김 - 잠깐 거치는 페이지)
+// 5-B Round 3 (2026-05-13) - 회원가입 3단계 분리 라우트 추가.
+//   - /signup/type : 가입 방식 선택 (카카오 vs ID/PW)
+//   - /signup/agree : 약관 동의
+//   - /signup : 회원 정보 입력 (가드: agreedAt 없으면 /signup/type)
+//   - CHROME_HIDDEN_PATHS '/signup' prefix 라서 3개 모두 헤더/푸터 자동 숨김.
 //
 // 그 외 라우트는 라운드 3-Q 그대로 유지.
 
@@ -17,6 +17,8 @@ import KeyboardBuilder from './pages/KeyboardBuilder';
 import KeyboardBuilderRoute from './pages/KeyboardBuilderRoute';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
+import JoinTypeChoicePage from './pages/JoinTypeChoicePage';
+import JoinAgreePage from './pages/JoinAgreePage';
 import MyPage from './pages/MyPage';
 import PlaceholderPage from './pages/PlaceholderPage';
 import NoticeDetailPage from './pages/NoticeDetailPage';
@@ -27,6 +29,7 @@ import Footer from './components/Footer';
 import { useCartStore } from './stores/cartStore';
 
 // '/auth' 추가: 카카오 콜백 페이지는 잠깐 거치는 페이지라 헤더/푸터 노출 불필요.
+// '/signup' prefix 라서 /signup/type, /signup/agree 도 자동 적용됨.
 const CHROME_HIDDEN_PATHS = ['/builder', '/login', '/signup', '/auth'];
 
 function ConditionalChrome({ children }) {
@@ -70,7 +73,12 @@ function App() {
 
         {/* 5-B 인증/회원 */}
         <Route path="/login" element={<LoginPage />} />
+
+        {/* 5-B Round 3 - 회원가입 3단계 분리 */}
+        <Route path="/signup/type" element={<JoinTypeChoicePage />} />
+        <Route path="/signup/agree" element={<JoinAgreePage />} />
         <Route path="/signup" element={<SignupPage />} />
+
         <Route
           path="/mypage"
           element={
