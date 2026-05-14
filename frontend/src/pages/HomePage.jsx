@@ -1,21 +1,17 @@
 // frontend/src/pages/HomePage.jsx
-// 5-B 라운드 3-S - swagkey 매칭 정밀화.
+// 5-B 라운드 3-T - Hero carousel 12장 자동 슬라이드 + dot 인디케이터 (swagkey 매칭)
 //
-// 변경 사항 (3-R → 3-S):
-//   1) heroStyles.cta:
-//      - padding: spacing[5] spacing[16] → spacing[3] spacing[10] (swagkey 첫 번째 이미지 사이즈로 원복)
-//      - fontSize: 22 / fontWeight: medium 유지
-//      - .sw-hero-cta 클래스로 hover 시 흰 배경 + 검은 글씨 전환 (스크린샷 2)
+// 변경 사항 (3-S → 3-T):
+//   1) Hero():
+//      - single fetch (size=1) → multi fetch (sort=createdAt,desc&size=12) NEW ARRIVALS 와 동기화
+//      - currentSlide state + 5초 자동 슬라이드 + dot 클릭 시 jump
+//      - hover 시 자동 슬라이드 일시정지
+//      - 이미지 전환 시 opacity 600ms fade
+//   2) heroStyles.dots / dot / dotActive 추가
 //
-//   2) NoticeBoard:
-//      - 3컬럼(No/제목/작성일) → 4컬럼(No/제목/작성시간/조회수) (스크린샷 3 매칭)
-//      - notices.js 의 n.viewCount 필드 사용
-//      - 헤더 톤 미세 조정: 굵은 2px 검정 → 1px 회색 가는 라인 (위/아래)
-//      - 우측 하단 [글쓰기] 버튼 추가, 호버 시 검정 채움, 클릭 → "작성 권한이 없습니다"
-//
-// 그 외 모든 섹션(Hero 본체/HomeProductCard/ProductSection)은 라운드 3-R 그대로 유지.
+// 그 외 모든 섹션은 3-S 그대로 유지.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { colors, typography, spacing, radius } from '../styles/tokens';
 import { ALL_NOTICES } from '../data/notices';
@@ -30,59 +26,112 @@ const SECTIONS = [
   { title: 'ACCESSORIES', productType: 'ACCESSORY', size: 6 },
 ];
 
-// ─── HERO CTA HOVER CSS (3-S 신규) ───────────────────────────────────────────
+// ─── HERO 상수 ───────────────────────────────────────────────────────────────
+const HERO_SLIDE_COUNT = 12;
+const HERO_SLIDE_INTERVAL_MS = 5000;
+
+// ─── HERO CSS ────────────────────────────────────────────────────────────────
 const HERO_CTA_CSS = `
 .sw-hero-cta { transition: background 0.25s ease, color 0.25s ease; }
 .sw-hero-cta:hover { background: #ffffff !important; color: #000000 !important; }
+.sw-hero-bg { transition: opacity 0.6s ease, background-image 0s; }
+.sw-hero-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: rgba(255,255,255,0.4);
+  border: 1.5px solid rgba(255,255,255,0.7);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+.sw-hero-dot:hover { transform: scale(1.15); background: rgba(255,255,255,0.7); }
+.sw-hero-dot.is-active { background: #ffffff; border-color: #ffffff; }
 `;
 
 // ─── HERO ────────────────────────────────────────────────────────────────────
 function Hero() {
-  const [featured, setFeatured] = useState(null);
-  const [imgLoaded, setImgLoaded] = useState(false);
+  const [slides, setSlides] = useState([]);
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const [imgLoaded, setImgLoaded] = useState({});
+  const isPausedRef = useRef(false);
 
+  // 1) NEW ARRIVALS 12장 fetch
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`${API_BASE}/products?productType=KEYBOARD&size=1`, { signal: controller.signal })
+    fetch(`${API_BASE}/products?sort=createdAt,desc&size=${HERO_SLIDE_COUNT}`, {
+      signal: controller.signal,
+    })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data) => {
-        if (data.content?.[0]) setFeatured(data.content[0]);
+        const list = (data.content || []).filter((p) => p.imageUrl);
+        setSlides(list.slice(0, HERO_SLIDE_COUNT));
       })
       .catch(() => {});
     return () => controller.abort();
   }, []);
 
+  // 2) 이미지 preload (slide 별 imgLoaded 추적)
   useEffect(() => {
-    if (!featured?.imageUrl) {
-      setImgLoaded(false);
-      return;
-    }
-    const img = new Image();
-    img.onload = () => setImgLoaded(true);
-    img.onerror = () => setImgLoaded(false);
-    img.src = featured.imageUrl;
-  }, [featured?.imageUrl]);
+    slides.forEach((s, idx) => {
+      if (imgLoaded[idx] || !s.imageUrl) return;
+      const img = new Image();
+      img.onload = () => setImgLoaded((prev) => ({ ...prev, [idx]: true }));
+      img.onerror = () => setImgLoaded((prev) => ({ ...prev, [idx]: false }));
+      img.src = s.imageUrl;
+    });
+  }, [slides, imgLoaded]);
+
+  // 3) 5초마다 자동 슬라이드 (hover 시 일시정지)
+  useEffect(() => {
+    if (slides.length <= 1) return;
+    const id = setInterval(() => {
+      if (isPausedRef.current) return;
+      setCurrentSlide((prev) => (prev + 1) % slides.length);
+    }, HERO_SLIDE_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [slides.length]);
+
+  const featured = slides[currentSlide];
+  const isImgReady = featured && imgLoaded[currentSlide];
 
   const ctaTo = featured ? `/products/${featured.id}` : '/products?productType=KEYBOARD';
   const title = featured?.name || 'SWACHRON Custom Keyboards';
 
-  const bgStyle =
-    imgLoaded && featured?.imageUrl
-      ? {
-          backgroundImage: `url(${featured.imageUrl})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-        }
-      : { backgroundImage: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)' };
+  const bgStyle = isImgReady
+    ? {
+        backgroundImage: `url(${featured.imageUrl})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+      }
+    : { backgroundImage: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)' };
 
   return (
-    <div style={{ ...heroStyles.wrapper, ...bgStyle }}>
+    <div
+      style={{ ...heroStyles.wrapper, ...bgStyle }}
+      className="sw-hero-bg"
+      onMouseEnter={() => { isPausedRef.current = true; }}
+      onMouseLeave={() => { isPausedRef.current = false; }}
+    >
       <style>{HERO_CTA_CSS}</style>
       <div style={heroStyles.dimOverlay} />
       <div style={heroStyles.content}>
         <h1 style={heroStyles.title}>{title}</h1>
         <Link to={ctaTo} className="sw-hero-cta" style={heroStyles.cta}>제품 보러가기</Link>
       </div>
+
+      {/* dot 인디케이터 — 12개 (slide 부족하면 그만큼) */}
+      {slides.length > 1 && (
+        <div style={heroStyles.dots}>
+          {slides.map((_, i) => (
+            <button
+              key={i}
+              type="button"
+              className={`sw-hero-dot ${i === currentSlide ? 'is-active' : ''}`}
+              onClick={() => setCurrentSlide(i)}
+              aria-label={`${i + 1}번째 슬라이드로 이동`}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -308,7 +357,6 @@ const heroStyles = {
     lineHeight: 1.15,
     textShadow: '0 2px 12px rgba(0,0,0,0.4)',
   },
-  // 3-S: padding 원복 (swagkey 첫 번째 이미지 사이즈) + .sw-hero-cta 클래스로 hover 처리
   cta: {
     display: 'inline-block',
     padding: `${spacing[3]} ${spacing[10]}`,
@@ -320,6 +368,17 @@ const heroStyles = {
     textDecoration: 'none',
     letterSpacing: '0.02em',
     cursor: 'pointer',
+  },
+  // 3-T 신규: dot 인디케이터 (하단 중앙)
+  dots: {
+    position: 'absolute',
+    bottom: '7%',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    display: 'flex',
+    gap: 10,
+    zIndex: 3,
+    padding: `${spacing[2]} ${spacing[4]}`,
   },
 };
 
@@ -392,7 +451,6 @@ const noticeStyles = {
     textAlign: 'center',
   },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: typography.fontSize.base },
-  // 3-S: 헤더 톤 swagkey 매칭 (굵은 2px 검정 → 1px 회색 위/아래)
   th: {
     padding: `${spacing[3]} ${spacing[4]}`,
     textAlign: 'left',
@@ -418,7 +476,6 @@ const noticeStyles = {
     fontWeight: typography.fontWeight.bold,
     verticalAlign: 'middle',
   },
-  // 3-S 신규: 글쓰기 버튼 row (우측 정렬)
   writeBtnRow: {
     display: 'flex',
     justifyContent: 'flex-end',
