@@ -1,28 +1,40 @@
 // frontend/src/components/RecentlyViewedSidebar.jsx
 //
 // 최근 본 상품 우측 fixed 사이드바 (5/15 0:45, swagkey UX 매칭).
+// 5/15 1:25 — 각 카드에 X 삭제 버튼 추가 (hover 페이드인, swagkey 패턴).
 //
 // 정책:
-//   - 비로그인 시 안 보임 (요구사항)
-//   - 로그인 + 최근 본 상품 0개 → 안 보임 (스크롤 방해 X)
-//   - 로그인 + 1개 이상 → 우측 fixed 표시 (max 5개)
-//   - storage event + custom event 둘 다 listen (다른 탭 + 같은 탭)
-//
-// 카드 디자인:
-//   - 60×60 정사각 이미지 + 이름 12자 truncate
-//   - 클릭 시 /products/{id} 이동
-//   - swagkey 톤: 흰 배경 + 얇은 회색 보더
+//   - 비로그인 시 안 보임
+//   - 빈 상태 안 보임 (스크롤 방해 X)
+//   - HIDDEN_PATHS (builder/login/signup/auth/admin) 에선 미표시
+//   - 각 카드 hover 시 우측 상단 X 버튼 페이드인
+//   - X 클릭: stopPropagation 으로 Link 이동 방지 + localStorage 에서 해당 id 제거
 
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { getRecentlyViewed } from '../utils/recentlyViewed';
+import { getRecentlyViewed, removeRecentlyViewed } from '../utils/recentlyViewed';
 import { colors, typography, spacing, zIndex, radius } from '../styles/tokens';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
-
-// 사이드바 표시 안 할 경로 (builder/admin/auth 는 chrome 안 보이는 영역)
 const HIDDEN_PATHS = ['/builder', '/login', '/signup', '/auth', '/admin'];
+
+// X 버튼 hover 페이드인 CSS (모바일은 항상 표시)
+const HOVER_CSS = `
+.sw-recent-card .sw-recent-x {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.sw-recent-card:hover .sw-recent-x {
+  opacity: 1;
+}
+.sw-recent-x:hover {
+  background: rgba(0,0,0,0.7) !important;
+}
+@media (hover: none) {
+  .sw-recent-card .sw-recent-x { opacity: 0.7; }
+}
+`;
 
 export default function RecentlyViewedSidebar() {
   const { user } = useAuth();
@@ -30,7 +42,6 @@ export default function RecentlyViewedSidebar() {
   const [productIds, setProductIds] = useState(() => getRecentlyViewed());
   const [products, setProducts] = useState([]);
 
-  // localStorage 변경 감지 (같은 탭 = custom event, 다른 탭 = storage event)
   useEffect(() => {
     const handler = () => setProductIds(getRecentlyViewed());
     window.addEventListener('recentlyViewedChange', handler);
@@ -41,7 +52,6 @@ export default function RecentlyViewedSidebar() {
     };
   }, []);
 
-  // productIds → 상품 fetch (병렬 GET, 실패한 건 skip)
   useEffect(() => {
     if (!user || productIds.length === 0) {
       setProducts([]);
@@ -56,33 +66,56 @@ export default function RecentlyViewedSidebar() {
       )
     ).then((results) => {
       if (controller.signal.aborted) return;
-      // null 제거 + productIds 순서 보존
       setProducts(results.filter(Boolean));
     });
     return () => controller.abort();
   }, [productIds, user]);
 
-  // 숨김 조건
+  const handleRemove = (e, productId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    removeRecentlyViewed(productId);
+  };
+
   if (!user) return null;
   if (products.length === 0) return null;
   if (HIDDEN_PATHS.some((p) => location.pathname.startsWith(p))) return null;
 
   return (
-    <aside style={styles.sidebar}>
-      <div style={styles.title}>최근 본 상품</div>
-      {products.map((p) => (
-        <Link key={p.id} to={`/products/${p.id}`} style={styles.card} title={p.name}>
-          <div style={styles.imageBox}>
-            {p.imageUrl ? (
-              <img src={p.imageUrl} alt={p.name} style={styles.image} />
-            ) : (
-              <div style={styles.placeholder}>—</div>
-            )}
-          </div>
-          <div style={styles.name}>{truncate(p.name, 7)}</div>
-        </Link>
-      ))}
-    </aside>
+    <>
+      <style>{HOVER_CSS}</style>
+      <aside style={styles.sidebar}>
+        <div style={styles.title}>최근 본 상품</div>
+        {products.map((p) => (
+          <Link
+            key={p.id}
+            to={`/products/${p.id}`}
+            style={styles.card}
+            className="sw-recent-card"
+            title={p.name}
+          >
+            <div style={styles.imageBox}>
+              {p.imageUrl ? (
+                <img src={p.imageUrl} alt={p.name} style={styles.image} />
+              ) : (
+                <div style={styles.placeholder}>—</div>
+              )}
+              <button
+                type="button"
+                className="sw-recent-x"
+                style={styles.removeBtn}
+                onClick={(e) => handleRemove(e, p.id)}
+                aria-label={`${p.name} 최근 목록에서 제거`}
+                title="목록에서 제거"
+              >
+                ×
+              </button>
+            </div>
+            <div style={styles.name}>{truncate(p.name, 7)}</div>
+          </Link>
+        ))}
+      </aside>
+    </>
   );
 }
 
@@ -124,8 +157,10 @@ const styles = {
     flexDirection: 'column',
     alignItems: 'center',
     gap: 4,
+    position: 'relative',
   },
   imageBox: {
+    position: 'relative',
     width: 60,
     height: 60,
     background: colors.surface,
@@ -141,9 +176,27 @@ const styles = {
     objectFit: 'contain',
     display: 'block',
   },
-  placeholder: {
-    color: colors.textOnLightDim,
-    fontSize: 10,
+  placeholder: { color: colors.textOnLightDim, fontSize: 10 },
+  removeBtn: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    width: 16,
+    height: 16,
+    borderRadius: '50%',
+    border: 'none',
+    background: 'rgba(0,0,0,0.55)',
+    color: '#fff',
+    fontSize: 12,
+    lineHeight: 1,
+    fontWeight: 700,
+    cursor: 'pointer',
+    padding: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontFamily: 'inherit',
+    transition: 'background 0.15s ease',
   },
   name: {
     fontSize: 10,

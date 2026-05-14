@@ -1,6 +1,7 @@
 // frontend/src/utils/recentlyViewed.js
 //
 // 최근 본 상품 localStorage 헬퍼 (5/15 0:45, swagkey UX 패턴 이식).
+// 5/15 1:28 — removeRecentlyViewed 추가 (사이드바 카드 X 버튼).
 //
 // 정책:
 //   - 최대 5개 (swagkey 우측 패널 기준)
@@ -29,6 +30,15 @@ export function addRecentlyViewed(productId) {
     const next = [productId, ...current].slice(0, MAX);
     localStorage.setItem(KEY, JSON.stringify(next));
     window.dispatchEvent(new CustomEvent('recentlyViewedChange', { detail: next }));
+  } catch {}
+}
+
+export function removeRecentlyViewed(productId) {
+  if (!productId) return;
+  try {
+    const current = getRecentlyViewed().filter((id) => id !== productId);
+    localStorage.setItem(KEY, JSON.stringify(current));
+    window.dispatchEvent(new CustomEvent('recentlyViewedChange', { detail: current }));
   } catch {}
 }
 
