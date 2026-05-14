@@ -120,7 +120,7 @@ export default function AdminAuditLogPage() {
         <header style={S.header}>
           <h1 style={S.title}>감사 로그</h1>
           <p style={S.subtitle}>
-            관리자 액션 자동 기록 (Phase 7-A AuditLog @Aspect)
+            관리자 액션 자동 기록
           </p>
         </header>
 
