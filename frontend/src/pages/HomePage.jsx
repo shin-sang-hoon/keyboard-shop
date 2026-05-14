@@ -73,7 +73,7 @@ function Hero() {
           backgroundSize: 'cover',
           backgroundPosition: 'center',
         }
-      : { background: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)' };
+      : { backgroundImage: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)' };
 
   return (
     <div style={{ ...heroStyles.wrapper, ...bgStyle }}>
@@ -274,8 +274,8 @@ export default function HomePage() {
 const heroStyles = {
   wrapper: {
     position: 'relative',
-    height: '85vh',
-    minHeight: 600,
+    height: '100vh',
+    minHeight: 700,
     overflow: 'hidden',
     backgroundSize: 'cover',
     backgroundPosition: 'center',

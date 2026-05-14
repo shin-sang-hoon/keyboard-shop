@@ -25,6 +25,7 @@ import KakaoCallbackPage from './pages/KakaoCallbackPage';
 import AdminAuditLogPage from './pages/admin/AdminAuditLogPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import Header from './components/Header';
+import RecentlyViewedSidebar from './components/RecentlyViewedSidebar';
 import Footer from './components/Footer';
 import { useCartStore } from './stores/cartStore';
 
@@ -60,6 +61,7 @@ function App() {
   return (
     <BrowserRouter>
       <ConditionalChrome><Header /></ConditionalChrome>
+      <ConditionalChrome><RecentlyViewedSidebar /></ConditionalChrome>
       <Routes>
         {/* 메인 - 5-B 라운드 3-D 신규 HomePage */}
         <Route path="/" element={<HomePage />} />

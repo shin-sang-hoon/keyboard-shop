@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { addRecentlyViewed } from '../utils/recentlyViewed';
 import { useParams, Link } from 'react-router-dom';
 import ProductGallery from '../components/ProductGallery';
 import ProductTabs from '../components/ProductTabs';
@@ -158,7 +159,7 @@ export default function ProductDetail() {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
-      .then((data) => setProduct(data))
+      .then((data) => { setProduct(data); addRecentlyViewed(data.id); })
       .catch((err) => {
         if (err.name === 'AbortError') return;
         setError(err.message);
