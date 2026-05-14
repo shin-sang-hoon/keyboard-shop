@@ -2,10 +2,9 @@
 //
 // 5-B 라운드 Day 2 (2026-05-09) - KakaoCallbackPage 라우트 추가.
 // 5-B Round 3 (2026-05-13) - 회원가입 3단계 분리 라우트 추가.
-//   - /signup/type : 가입 방식 선택 (카카오 vs ID/PW)
-//   - /signup/agree : 약관 동의
-//   - /signup : 회원 정보 입력 (가드: agreedAt 없으면 /signup/type)
-//   - CHROME_HIDDEN_PATHS '/signup' prefix 라서 3개 모두 헤더/푸터 자동 숨김.
+// Phase 7 [9-2B] (2026-05-14) - AdminAuditLogPage 라우트 추가.
+//   - /admin/audit-logs : 감사 로그 뷰어 (ProtectedRoute + ADMIN role 가드)
+//   - CHROME_HIDDEN_PATHS '/admin' 추가 — 관리자 영역은 별도 chrome 정책 (Phase 7-A 에서 AdminApp shell 도입 예정)
 //
 // 그 외 라우트는 라운드 3-Q 그대로 유지.
 
@@ -23,6 +22,7 @@ import MyPage from './pages/MyPage';
 import PlaceholderPage from './pages/PlaceholderPage';
 import NoticeDetailPage from './pages/NoticeDetailPage';
 import KakaoCallbackPage from './pages/KakaoCallbackPage';
+import AdminAuditLogPage from './pages/admin/AdminAuditLogPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import Header from './components/Header';
 import Footer from './components/Footer';
@@ -30,7 +30,8 @@ import { useCartStore } from './stores/cartStore';
 
 // '/auth' 추가: 카카오 콜백 페이지는 잠깐 거치는 페이지라 헤더/푸터 노출 불필요.
 // '/signup' prefix 라서 /signup/type, /signup/agree 도 자동 적용됨.
-const CHROME_HIDDEN_PATHS = ['/builder', '/login', '/signup', '/auth'];
+// '/admin' 추가: 관리자 영역은 사용자 chrome 숨김 (Phase 7-A 의 AdminApp shell 도입 시 별도 admin chrome 제공 예정).
+const CHROME_HIDDEN_PATHS = ['/builder', '/login', '/signup', '/auth', '/admin'];
 
 function ConditionalChrome({ children }) {
   const location = useLocation();
@@ -84,6 +85,17 @@ function App() {
           element={
             <ProtectedRoute>
               <MyPage />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Phase 7 [9-2B] - 감사 로그 뷰어 (ADMIN role 가드).
+            ProtectedRoute 가 비로그인 시 /login 으로, role 검사로 ADMIN 만 통과. */}
+        <Route
+          path="/admin/audit-logs"
+          element={
+            <ProtectedRoute requireRole="ADMIN">
+              <AdminAuditLogPage />
             </ProtectedRoute>
           }
         />
