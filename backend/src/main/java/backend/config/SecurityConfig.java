@@ -77,6 +77,7 @@ public class SecurityConfig {
                         // [Phase 7 WebSocket · 5/12] STOMP endpoint - public handshake.
                         // SockJS info endpoint also under /ws/info, covered by /ws/** pattern.
                         // Phase 8: replace with STOMP ChannelInterceptor for JWT on CONNECT.
+                        .requestMatchers("/api/auctions", "/api/auctions/**").permitAll()
                         .requestMatchers("/ws/**").permitAll()
 
                         // Admin

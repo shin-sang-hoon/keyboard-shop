@@ -23,6 +23,8 @@ import PlaceholderPage from './pages/PlaceholderPage';
 import NoticeDetailPage from './pages/NoticeDetailPage';
 import KakaoCallbackPage from './pages/KakaoCallbackPage';
 import AdminAuditLogPage from './pages/admin/AdminAuditLogPage';
+import AuctionListPage from './pages/AuctionListPage';
+import AuctionDetailPage from './pages/AuctionDetailPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import Header from './components/Header';
 import RecentlyViewedSidebar from './components/RecentlyViewedSidebar';
@@ -73,6 +75,8 @@ function App() {
 
         {/* 공지사항 상세 - 5-B 라운드 3-Q 신규 */}
         <Route path="/notices/:id" element={<NoticeDetailPage />} />
+        <Route path="/auctions" element={<AuctionListPage />} />
+        <Route path="/auctions/:id" element={<AuctionDetailPage />} />
 
         {/* 5-B 인증/회원 */}
         <Route path="/login" element={<LoginPage />} />

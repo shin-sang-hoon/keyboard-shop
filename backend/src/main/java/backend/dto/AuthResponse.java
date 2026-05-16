@@ -21,6 +21,7 @@ import lombok.Getter;
 @Builder
 @AllArgsConstructor
 public class AuthResponse {
+    private Long id;
     private String accessToken;
     private String refreshToken;
     private String email;

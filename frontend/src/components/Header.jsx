@@ -32,6 +32,7 @@ const NAV_ITEMS = [
   { label: 'Keycaps',     to: '/products?productType=KEYCAP',         type: 'KEYCAP' },
   { label: 'Switches',    to: '/products?productType=SWITCH_PART',    type: 'SWITCH_PART' },
   { label: 'Accessories', to: '/products?productType=ACCESSORY',      type: 'ACCESSORY' },
+  { label: 'Auctions',    to: '/auctions' },
 ];
 
 function displayName(user) {

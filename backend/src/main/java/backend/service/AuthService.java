@@ -128,6 +128,7 @@ public class AuthService {
 
         // /me does not need new tokens; return null for token fields.
         return AuthResponse.builder()
+                .id(user.getId())
                 .accessToken(null)
                 .refreshToken(null)
                 .email(user.getEmail())
@@ -221,6 +222,7 @@ public class AuthService {
                 user.getEmail(), user.getRole().name());
         String refreshToken = jwtUtil.generateRefreshToken(user.getEmail());
         return AuthResponse.builder()
+                .id(user.getId())
                 .accessToken(accessToken)
                 .refreshToken(refreshToken)
                 .email(user.getEmail())
