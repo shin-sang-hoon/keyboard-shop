@@ -69,7 +69,7 @@ public class Auction {
 
     @PrePersist
     public void prePersist() {
-        this.createdAt = LocalDateTime.now();
+        this.createdAt = LocalDateTime.now(java.time.ZoneOffset.UTC);
         if (this.status == null) this.status = Status.ACTIVE;
         if (this.currentPrice == 0) this.currentPrice = this.startPrice;
         if (this.version == null) this.version = 0L;

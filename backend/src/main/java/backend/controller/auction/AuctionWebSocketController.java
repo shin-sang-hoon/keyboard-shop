@@ -118,7 +118,7 @@ public class AuctionWebSocketController {
         }
 
         // 3. 종료 시각 검증
-        if (auction.getEndAt() != null && auction.getEndAt().isBefore(LocalDateTime.now())) {
+        if (auction.getEndAt() != null && auction.getEndAt().isBefore(LocalDateTime.now(java.time.ZoneOffset.UTC))) {
             sendRejection(auctionId, "Auction has ended");
             auction.setStatus(Auction.Status.ENDED);
             auctionRepository.save(auction);
@@ -162,7 +162,7 @@ public class AuctionWebSocketController {
                 .auctionId(auctionId)
                 .currentPrice(request.getBidPrice())
                 .bidderName(user.getName())
-                .bidAt(bid.getCreatedAt() != null ? bid.getCreatedAt() : LocalDateTime.now())
+                .bidAt(bid.getCreatedAt() != null ? bid.getCreatedAt() : LocalDateTime.now(java.time.ZoneOffset.UTC))
                 .build();
 
         messagingTemplate.convertAndSend("/topic/auction/" + auctionId, broadcast);
