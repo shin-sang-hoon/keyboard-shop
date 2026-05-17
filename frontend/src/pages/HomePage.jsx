@@ -171,7 +171,7 @@ function HomeProductCard({ product }) {
 }
 
 // ─── SECTION ─────────────────────────────────────────────────────────────────
-function ProductSection({ title, productType, size = 6 }) {
+function ProductSection({ title, productType, size = 6, index = 0 }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -191,10 +191,17 @@ function ProductSection({ title, productType, size = 6 }) {
       fetch(url, { signal: controller.signal })
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))));
 
-    const RETRY_DELAYS = [300, 800];  // 2회 재시도, 지수 백오프
+    // race v2 (5/18): stagger + retry 4번 + 로그
+    const STAGGER_MS = index * 100;  // race v3: StrictMode abort 위험 최소화
+    const RETRY_DELAYS = [500, 1500, 3000];  // 3회 재시도, 지수 백오프
     (async () => {
+      console.log(`[Section ${title}] mount idx=${index} stagger=${STAGGER_MS}ms`);
+      if (STAGGER_MS > 0) {
+        await new Promise((r) => setTimeout(r, STAGGER_MS));
+        if (controller.signal.aborted) { console.log(`[Section ${title}] aborted during stagger`); return; }
+      }
+      console.log(`[Section ${title}] fetching ${url}`);
       let lastErr = null;
-      // 첫 시도 + 2회 재시도 = 총 3번
       for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
         if (controller.signal.aborted) return;
         if (attempt > 0) {
@@ -203,22 +210,25 @@ function ProductSection({ title, productType, size = 6 }) {
         }
         try {
           const data = await doFetch();
-          setProducts(data.content || []);
+          const list = data.content || [];
+          console.log(`[Section ${title}] fetched ${list.length} items (attempt ${attempt + 1})`);
+          setProducts(list);
           lastErr = null;
           break;
         } catch (err) {
-          if (err.name === 'AbortError') return;
+          if (err.name === 'AbortError') { console.log(`[Section ${title}] aborted`); return; }
+          console.warn(`[Section ${title}] attempt ${attempt + 1} failed:`, err.message);
           lastErr = err;
         }
       }
       if (lastErr) {
-        console.error(`Section ${title} fetch failed after retries:`, lastErr);
+        console.error(`[Section ${title}] all retries failed:`, lastErr);
       }
       if (!controller.signal.aborted) setLoading(false);
     })();
 
     return () => controller.abort();
-  }, [productType, size, title]);
+  }, [productType, size, title, index]);
 
   if (!loading && products.length === 0) return null;
 
@@ -350,7 +360,7 @@ export default function HomePage() {
     <div style={{ background: colors.white, fontFamily: typography.fontFamily.base }}>
       <Hero />
       <div style={containerStyles.container}>
-        {SECTIONS.map((s) => <ProductSection key={s.title} {...s} />)}
+        {SECTIONS.map((s, idx) => <ProductSection key={s.title} index={idx} {...s} />)}
         <NoticeBoard />
       </div>
     </div>
