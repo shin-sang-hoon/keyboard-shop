@@ -58,6 +58,45 @@ public class Auction {
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
+    // ─── Flash Deal 확장 (V9, 5/17) ───────────────────────────────
+    /**
+     * 플래시 딜 여부.
+     * - TRUE: 관리자가 등록한 한정판 콜라보 이벤트 경매 (고가 키보드 상위 5%)
+     * - FALSE: 일반 경매 (어제 만든 Auction 트랙 기본값)
+     */
+    @Column(name = "is_flash_deal", nullable = false)
+    @Builder.Default
+    private Boolean isFlashDeal = false;
+
+    /**
+     * 시작가 비율 (30~70, 플래시 딜 전용).
+     * 정가의 N% 를 시작가로 설정. NULL = 일반 경매 (관리자가 startPrice 직접 입력).
+     * 예: 정가 500,000원 x 50% = 시작가 250,000원
+     */
+    @Column(name = "start_price_percent")
+    private Integer startPricePercent;
+
+    /**
+     * 경매 지속 시간 (1~168시간, 기본 24h).
+     * createdAt + duration_hours = endAt 자동 계산용.
+     */
+    @Column(name = "duration_hours", nullable = false)
+    @Builder.Default
+    private Integer durationHours = 24;
+
+    /**
+     * 예약 시작 시각 (V10, 5/17).
+     * - NULL: 등록 즉시 ACTIVE
+     * - NOT NULL + SCHEDULED status: 해당 시각에 자동 ACTIVE 전환
+     *
+     * AuctionScheduler.@Scheduled(fixedRate=60000) 가 매 분 체크하여
+     * startAt <= now AND status=SCHEDULED 인 row 를 ACTIVE 전환 + endAt 재계산
+     * (endAt = startAt + durationHours).
+     */
+    @Column(name = "start_at")
+    private LocalDateTime startAt;
+    // ──────────────────────────────────────────────────────────────
+
     /**
      * 낙관적 락 버전 (Phase 7 WebSocket, 5/12).
      * JPA 가 자동으로 UPDATE 시 WHERE version=? 추가 + version+1.
@@ -80,6 +119,22 @@ public class Auction {
     }
 
     public enum Status {
-        ACTIVE, ENDED, CANCELLED
+        /**
+         * 진행 중 — 입찰 가능.
+         */
+        ACTIVE,
+        /**
+         * 자연 종료 — endAt 도달, 최고입찰자 낙찰.
+         */
+        ENDED,
+        /**
+         * 취소 — 관리자 직접 취소 또는 입찰 0건 상태 취소.
+         */
+        CANCELLED,
+        /**
+         * 예약 등록 (V10, 5/17) — startAt 도달 시 자동 ACTIVE 전환.
+         * AuctionScheduler.@Scheduled(fixedRate=60000) 가 매 분 체크.
+         */
+        SCHEDULED
     }
 }

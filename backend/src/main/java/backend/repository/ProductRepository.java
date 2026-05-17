@@ -74,4 +74,30 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             @Param("productType") ProductType productType,
             @Param("status") ProductStatus status,
             Pageable pageable);
+
+    // ─── Flash Deal 임계값 (5/17) ──────────────────────────────────
+    /**
+     * KEYBOARD ACTIVE 총 개수.
+     * MySQL 의 prepared statement OFFSET 제약 회피용 2단계 쿼리 1단계.
+     */
+    @Query(value = """
+        SELECT COUNT(*) FROM products
+        WHERE product_type = 'KEYBOARD' AND status = 'ACTIVE'
+        """, nativeQuery = true)
+    long countActiveKeyboards();
+
+    /**
+     * KEYBOARD ACTIVE 가격 내림차순 N번째.
+     * Service 가 OFFSET 정수를 계산해서 전달 (prepared statement 안전).
+     *
+     * 예: total=104, topPercent=5 → offset=5 → 6번째 비싼 키보드 = 상위 5% 임계
+     * (FLOOR(104*5/100)=5, 0-indexed offset)
+     */
+    @Query(value = """
+        SELECT price FROM products
+        WHERE product_type = 'KEYBOARD' AND status = 'ACTIVE'
+        ORDER BY price DESC
+        LIMIT 1 OFFSET :offset
+        """, nativeQuery = true)
+    Optional<Integer> findPriceAtOffset(@Param("offset") long offset);
 }
