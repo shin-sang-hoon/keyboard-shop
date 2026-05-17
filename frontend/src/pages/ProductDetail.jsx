@@ -147,6 +147,11 @@ export default function ProductDetail() {
   // ─── 토스트 ──────────────────────────────────────────────
   const [toast, setToast] = useState({ message: '', visible: false });
 
+  // ─── Flash Deal (5/17 라운드 4) ─────────────────────────────
+  // 현재 상품의 ACTIVE 경매 정보 (없으면 null). startPrice 가 이미 할인된 가격.
+  // 정가는 product.price.
+  const [activeAuction, setActiveAuction] = useState(null);
+
   // ─── 상품 데이터 fetch ────────────────────────────────────
   useEffect(() => {
     const controller = new AbortController();
@@ -168,6 +173,31 @@ export default function ProductDetail() {
         if (!controller.signal.aborted) setLoading(false);
       });
 
+    return () => controller.abort();
+  }, [id]);
+
+  // ─── Flash Deal fetch ──────────────────────────────────────
+  // GET /api/auctions/active/by-product/{id} — 200 + Detail or 204 No Content.
+  // 핫딜 없는 일반 상품도 정상 (204 → activeAuction=null 유지).
+  useEffect(() => {
+    if (!id) return;
+    const controller = new AbortController();
+    fetch(`${API_BASE}/auctions/active/by-product/${id}`, { signal: controller.signal })
+      .then((r) => {
+        if (r.status === 204) return null;
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        if (data && controller.signal.aborted === false) {
+          setActiveAuction(data);
+        }
+      })
+      .catch((err) => {
+        if (err.name !== 'AbortError') {
+          console.warn('Active auction fetch failed:', err);
+        }
+      });
     return () => controller.abort();
   }, [id]);
 
@@ -403,9 +433,26 @@ export default function ProductDetail() {
               </button>
             </div>
 
-            <div style={S.price}>
-              ₩{(product.price || 0).toLocaleString()}
-            </div>
+            {activeAuction ? (
+              <div style={S.priceBlock}>
+                <div style={S.hotdealBadgeRow}>
+                  <span style={S.hotdealBadge}>🔥 핫딜 진행중</span>
+                  <span style={S.discountBadge}>-{activeAuction.startPricePercent}%</span>
+                </div>
+                <div style={S.priceRow}>
+                  <span style={S.priceDiscounted}>
+                    ₩{(activeAuction.currentPrice || activeAuction.startPrice || 0).toLocaleString()}
+                  </span>
+                  <span style={S.priceOriginal}>
+                    ₩{(product.price || 0).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div style={S.price}>
+                ₩{(product.price || 0).toLocaleString()}
+              </div>
+            )}
 
             <SpecChips product={product} />
 
@@ -612,6 +659,53 @@ const S = {
     fontWeight: 500,
   },
 
+  priceBlock: {
+    marginBottom: '20px',
+  },
+  hotdealBadgeRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    marginBottom: '8px',
+  },
+  hotdealBadge: {
+    display: 'inline-block',
+    padding: '4px 12px',
+    background: '#ef4444',
+    color: '#fff',
+    borderRadius: '4px',
+    fontSize: '13px',
+    fontWeight: 700,
+    letterSpacing: '-0.01em',
+  },
+  discountBadge: {
+    display: 'inline-block',
+    padding: '4px 10px',
+    background: '#fff',
+    color: '#ef4444',
+    border: '1.5px solid #ef4444',
+    borderRadius: '4px',
+    fontSize: '13px',
+    fontWeight: 700,
+  },
+  priceRow: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: '12px',
+    flexWrap: 'wrap',
+  },
+  priceDiscounted: {
+    fontSize: '32px',
+    fontWeight: 700,
+    color: '#ef4444',
+    letterSpacing: '-0.02em',
+  },
+  priceOriginal: {
+    fontSize: '16px',
+    color: '#999',
+    textDecoration: 'line-through',
+    textDecorationThickness: '1px',
+  },
   price: {
     fontSize: 28,
     fontWeight: 700,

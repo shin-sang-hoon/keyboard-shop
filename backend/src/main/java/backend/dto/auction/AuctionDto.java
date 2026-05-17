@@ -25,6 +25,8 @@ public class AuctionDto {
         private String condition;
         private LocalDateTime endAt;
         private LocalDateTime createdAt;
+        private Boolean isFlashDeal;
+        private Integer startPricePercent;
 
         public static ListItem from(Auction a) {
             return ListItem.builder()
@@ -37,6 +39,8 @@ public class AuctionDto {
                     .status(a.getStatus() != null ? a.getStatus().name() : null)
                     .condition(a.getCondition() != null ? a.getCondition().name() : null)
                     .endAt(a.getEndAt())
+                    .isFlashDeal(Boolean.TRUE.equals(a.getIsFlashDeal()))
+                    .startPricePercent(a.getStartPricePercent())
                     .createdAt(a.getCreatedAt())
                     .build();
         }
@@ -61,6 +65,8 @@ public class AuctionDto {
         private String sellerName;
         private Integer bidCount;
         private List<BidItem> recentBids;
+        private Boolean isFlashDeal;
+        private Integer startPricePercent;
 
         public static Detail from(Auction a, List<BidItem> recentBids, int totalBidCount) {
             return Detail.builder()
@@ -75,11 +81,21 @@ public class AuctionDto {
                     .status(a.getStatus() != null ? a.getStatus().name() : null)
                     .condition(a.getCondition() != null ? a.getCondition().name() : null)
                     .endAt(a.getEndAt())
+                    .isFlashDeal(Boolean.TRUE.equals(a.getIsFlashDeal()))
+                    .startPricePercent(a.getStartPricePercent())
                     .createdAt(a.getCreatedAt())
                     .sellerName(a.getSeller() != null ? a.getSeller().getName() : null)
                     .bidCount(totalBidCount)
                     .recentBids(recentBids)
                     .build();
+        }
+
+        /**
+         * 입찰 정보 없이 단순 조회용 오버로드.
+         * ProductDetail 페이지의 ACTIVE 핫딜 조회에서 사용 (입찰 내역 불필요).
+         */
+        public static Detail from(Auction a) {
+            return from(a, java.util.Collections.emptyList(), 0);
         }
     }
 

@@ -31,6 +31,22 @@ public class AuctionController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    /**
+     * GET /api/auctions/active/by-product/{productId}
+     *
+     * 특정 상품의 진행 중인 (ACTIVE) 경매 조회. 없으면 204 No Content.
+     * ProductDetail 페이지에서 핫딜 활성 여부 확인용.
+     *
+     * 면접 자산: 도메인 경계 분리 (Product/Auction) + RESTful 자원 책임 분리
+     *           + N+1 회귀 방지 (ProductDto LEFT JOIN 회피)
+     */
+    @GetMapping("/active/by-product/{productId}")
+    public ResponseEntity<AuctionDto.Detail> activeByProduct(@PathVariable Long productId) {
+        return auctionService.findActiveByProductId(productId)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
     @GetMapping("/{id}/bids")
     public ResponseEntity<List<AuctionDto.BidItem>> bids(
             @PathVariable Long id,

@@ -53,6 +53,16 @@ public class AuctionService {
         return Optional.of(AuctionDto.Detail.from(auction, recentBids, totalCount));
     }
 
+    /**
+     * 특정 상품의 ACTIVE 경매 조회 (없으면 Optional.empty).
+     * 사용자 ProductDetail 페이지에서 핫딜 표시용.
+     */
+    @Transactional(readOnly = true)
+    public Optional<AuctionDto.Detail> findActiveByProductId(Long productId) {
+        return auctionRepository.findByProductIdAndStatus(productId, Auction.Status.ACTIVE)
+                .map(AuctionDto.Detail::from);
+    }
+
     public List<AuctionDto.BidItem> listBids(Long auctionId, int limit) {
         Optional<Auction> auctionOpt = auctionRepository.findById(auctionId);
         if (auctionOpt.isEmpty()) {
