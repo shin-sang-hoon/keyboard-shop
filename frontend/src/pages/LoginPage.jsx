@@ -34,7 +34,7 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [kakaoLoading, setKakaoLoading] = useState(false);
 
-  const redirectTo = location.state?.from?.pathname || '/products';
+  const redirectTo = location.state?.from?.pathname || '/';
 
   async function handleSubmit(e) {
     e.preventDefault();

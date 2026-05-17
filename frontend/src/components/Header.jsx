@@ -10,7 +10,7 @@
 // 메뉴 폰트 키움, swagkey 톤 글씨체, Search 시 우측 액션 dim, SearchOverlay swagkey 매칭,
 // hover dim 우측 액션만, SNS 제거, 사용자 이름도 hover dim
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { colors, typography, spacing, zIndex, radius } from '../styles/tokens';
 import { useAuth } from '../hooks/useAuth';
@@ -54,6 +54,22 @@ export default function Header() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [adminMenuOpen, setAdminMenuOpen] = useState(false);
+  const adminMenuRef = useRef(null);
+
+  // 외부 클릭 시 admin 드롭다운 닫기
+  useEffect(() => {
+    if (!adminMenuOpen) return;
+    const handler = (e) => {
+      if (adminMenuRef.current && !adminMenuRef.current.contains(e.target)) {
+        setAdminMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [adminMenuOpen]);
+
+  const isAdmin = user?.role === 'ADMIN';
 
   const isOverlay = location.pathname === '/';
 
@@ -131,6 +147,59 @@ export default function Header() {
               </>
             )}
 
+            {isAdmin && (
+              <div ref={adminMenuRef} style={{ position: 'relative' }}>
+                <button
+                  onClick={() => setAdminMenuOpen((v) => !v)}
+                  className="sw-action-hover"
+                  style={{ ...btnStyle, fontWeight: typography.fontWeight.semibold }}
+                >
+                  Admin ▾
+                </button>
+                {adminMenuOpen && (
+                  <div style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 8px)',
+                    right: 0,
+                    minWidth: '180px',
+                    background: colors.white,
+                    border: `1px solid ${colors.borderLight}`,
+                    borderRadius: radius.md,
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                    overflow: 'hidden',
+                    zIndex: zIndex.sticky + 1,
+                  }}>
+                    <Link
+                      to="/admin/flash-deals"
+                      onClick={() => setAdminMenuOpen(false)}
+                      style={{
+                        display: 'block',
+                        padding: `${spacing[3]} ${spacing[4]}`,
+                        fontSize: typography.fontSize.sm,
+                        color: colors.textOnLight,
+                        textDecoration: 'none',
+                        borderBottom: `1px solid ${colors.borderLight}`,
+                      }}
+                    >
+                      🔥 플래시 경매 관리
+                    </Link>
+                    <Link
+                      to="/admin/audit-logs"
+                      onClick={() => setAdminMenuOpen(false)}
+                      style={{
+                        display: 'block',
+                        padding: `${spacing[3]} ${spacing[4]}`,
+                        fontSize: typography.fontSize.sm,
+                        color: colors.textOnLight,
+                        textDecoration: 'none',
+                      }}
+                    >
+                      📋 감사 로그
+                    </Link>
+                  </div>
+                )}
+              </div>
+            )}
             <Link to="/cart" className="sw-action-hover" style={linkStyle}>Cart</Link>
           </nav>
         </div>

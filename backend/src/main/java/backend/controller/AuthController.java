@@ -108,6 +108,29 @@ public class AuthController {
      *   - 환경 분기 (Mac 8080 / 학원 8081) 가 백엔드 properties 만으로 가능.
      *   - 향후 multi-provider (Google/Naver) 추가 시 같은 패턴 재활용.
      */
+    /**
+     * POST /api/auth/logout
+     *
+     * stateless JWT 의 logout 시맨틱: 서버는 토큰을 추적하지 않는다.
+     * 클라이언트가 accessToken/refreshToken 을 버리면 그게 곧 logout.
+     * 본 endpoint 는 200 OK + 로깅만 제공 (감사 + 운영 가시성).
+     *
+     * 향후 Phase 8: Redis 블랙리스트 도입 시 여기서 jti 등록 + TTL 부여.
+     *
+     * 면접 자산: stateless 인증의 logout 처리 (서버 액션 없이 클라이언트 책임),
+     *           500 노이즈 제거 + 감사 로깅 hook 마련.
+     */
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout() {
+        String email = org.springframework.security.core.context.SecurityContextHolder
+                .getContext().getAuthentication() != null
+                ? org.springframework.security.core.context.SecurityContextHolder
+                        .getContext().getAuthentication().getName()
+                : "anonymous";
+        log.info("Logout request: email={}", email);
+        return ResponseEntity.ok().build();
+    }
+
     @GetMapping("/kakao/authorize-url")
     public ResponseEntity<AuthorizeUrlResponse> kakaoAuthorizeUrl(
             @RequestParam(required = false) String state) {
