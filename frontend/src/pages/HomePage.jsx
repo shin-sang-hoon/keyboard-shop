@@ -54,18 +54,33 @@ function Hero() {
   const [imgLoaded, setImgLoaded] = useState({});
   const isPausedRef = useRef(false);
 
-  // 1) NEW ARRIVALS 12장 fetch
+  // 1) NEW ARRIVALS 12장 fetch (cold connection 대비 retry 2회 지수 백오프)
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`${API_BASE}/products?sort=createdAt,desc&size=${HERO_SLIDE_COUNT}`, {
-      signal: controller.signal,
-    })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((data) => {
-        const list = (data.content || []).filter((p) => p.imageUrl);
-        setSlides(list.slice(0, HERO_SLIDE_COUNT));
-      })
-      .catch(() => {});
+    const url = `${API_BASE}/products?sort=createdAt,desc&size=${HERO_SLIDE_COUNT}`;
+    const doFetch = () =>
+      fetch(url, { signal: controller.signal })
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))));
+
+    const RETRY_DELAYS = [300, 800];
+    (async () => {
+      for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+        if (controller.signal.aborted) return;
+        if (attempt > 0) {
+          await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt - 1]));
+          if (controller.signal.aborted) return;
+        }
+        try {
+          const data = await doFetch();
+          const list = (data.content || []).filter((p) => p.imageUrl);
+          setSlides(list.slice(0, HERO_SLIDE_COUNT));
+          return;
+        } catch (err) {
+          if (err.name === 'AbortError') return;
+        }
+      }
+    })();
+
     return () => controller.abort();
   }, []);
 
@@ -167,15 +182,40 @@ function ProductSection({ title, productType, size = 6 }) {
     params.set('size', size);
     if (productType) params.set('productType', productType);
 
-    fetch(`${API_BASE}/products?${params.toString()}`, { signal: controller.signal })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((data) => setProducts(data.content || []))
-      .catch((err) => {
-        if (err.name !== 'AbortError') console.error(`Section ${title} fetch failed:`, err);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
+    // Safari + Vite dev cold connection 에서 첫 마운트 시 일부 fetch 가
+    // TypeError: Load failed 로 떨어지는 race 가 관측됨 (5/17). 5개 ProductSection + Hero 동시 마운트.
+    // → 2회 retry, 지수 백오프 (300ms → 800ms). 마지막 시도까지 실패하면 콘솔 로그만.
+    // 면접 자산: 브라우저별 fetch 안정성 차이, exponential backoff retry 로 운영 신뢰도 향상.
+    const url = `${API_BASE}/products?${params.toString()}`;
+    const doFetch = () =>
+      fetch(url, { signal: controller.signal })
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))));
+
+    const RETRY_DELAYS = [300, 800];  // 2회 재시도, 지수 백오프
+    (async () => {
+      let lastErr = null;
+      // 첫 시도 + 2회 재시도 = 총 3번
+      for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+        if (controller.signal.aborted) return;
+        if (attempt > 0) {
+          await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt - 1]));
+          if (controller.signal.aborted) return;
+        }
+        try {
+          const data = await doFetch();
+          setProducts(data.content || []);
+          lastErr = null;
+          break;
+        } catch (err) {
+          if (err.name === 'AbortError') return;
+          lastErr = err;
+        }
+      }
+      if (lastErr) {
+        console.error(`Section ${title} fetch failed after retries:`, lastErr);
+      }
+      if (!controller.signal.aborted) setLoading(false);
+    })();
 
     return () => controller.abort();
   }, [productType, size, title]);
