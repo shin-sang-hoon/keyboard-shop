@@ -23,6 +23,7 @@ import PlaceholderPage from './pages/PlaceholderPage';
 import NoticeDetailPage from './pages/NoticeDetailPage';
 import KakaoCallbackPage from './pages/KakaoCallbackPage';
 import AdminAuditLogPage from './pages/admin/AdminAuditLogPage';
+import AdminFlashDealPage from './pages/admin/AdminFlashDealPage';
 import AuctionListPage from './pages/AuctionListPage';
 import AuctionDetailPage from './pages/AuctionDetailPage';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -102,6 +103,14 @@ function App() {
           element={
             <ProtectedRoute requireRole="ADMIN">
               <AdminAuditLogPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/flash-deals"
+          element={
+            <ProtectedRoute requireRole="ADMIN">
+              <AdminFlashDealPage />
             </ProtectedRoute>
           }
         />
