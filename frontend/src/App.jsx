@@ -45,6 +45,7 @@ function ConditionalChrome({ children }) {
 }
 
 import CartPage from './pages/CartPage';
+import OrderPlaceholderPage from './pages/OrderPlaceholderPage';
 
 // === Cart placeholder (5-D에서 본격 구현) ===
 function CartPlaceholder() {
@@ -124,6 +125,7 @@ function App() {
 
         {/* 5-D 장바구니/주문 - placeholder */}
         <Route path="/cart" element={<CartPage />} />
+        <Route path="/order" element={<OrderPlaceholderPage />} />
 
         {/* 약관 - placeholder (Phase 8 배포 시 실제 콘텐츠) */}
         <Route
