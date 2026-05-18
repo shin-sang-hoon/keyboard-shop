@@ -15,6 +15,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { colors, typography, spacing, zIndex, radius } from '../styles/tokens';
 import { useAuth } from '../hooks/useAuth';
 import SearchOverlay from './SearchOverlay';
+import { useCartStore } from '../stores/cartStore';
 
 const HOVER_CSS = `
 .sw-action-hover {
@@ -51,6 +52,7 @@ function displayName(user) {
 
 export default function Header() {
   const { user, logout } = useAuth();
+  const cartCount = useCartStore((s) => s.getTotalQuantity());
   const navigate = useNavigate();
   const location = useLocation();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -200,7 +202,16 @@ export default function Header() {
                 )}
               </div>
             )}
-            <Link to="/cart" className="sw-action-hover" style={linkStyle}>Cart</Link>
+            <Link to="/cart" className="sw-action-hover" style={linkStyle}>
+              Cart{cartCount > 0 && (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  marginLeft: 4, minWidth: 18, height: 18, padding: '0 5px',
+                  background: '#ef4444', color: '#fff', borderRadius: 9,
+                  fontSize: 11, fontWeight: 700, lineHeight: 1,
+                }}>{cartCount}</span>
+              )}
+            </Link>
           </nav>
         </div>
 

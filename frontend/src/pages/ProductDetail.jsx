@@ -5,6 +5,7 @@ import ProductGallery from '../components/ProductGallery';
 import ProductTabs from '../components/ProductTabs';
 import QnAFormModal from '../components/QnAFormModal';
 import ReviewFormModal from '../components/ReviewFormModal';
+import { useCartStore } from '../stores/cartStore';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
 
@@ -343,12 +344,24 @@ export default function ProductDetail() {
     }
   }
 
+  const addToCart = useCartStore((s) => s.addItem);
+
   function handleBuy() {
     showToast('구매 페이지 준비 중입니다');
   }
 
-  function handleAddToCart() {
-    showToast('장바구니에 담겼습니다 (준비 중)');
+  async function handleAddToCart() {
+    if (!product) return;
+    if (activeAuction) {
+      showToast('핫딜 상품은 입찰하러 가기를 이용해주세요');
+      return;
+    }
+    const result = await addToCart(product, 1);
+    if (result.ok) {
+      showToast('장바구니에 담겼습니다');
+    } else {
+      showToast(result.message || '장바구니 담기 실패');
+    }
   }
 
   function handle3DPreview() {
