@@ -8,6 +8,19 @@ import ReviewFormModal from '../components/ReviewFormModal';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
 
+// === LIVE pulse animation 한 번만 주입 (Phase 7 Round 4, 5/18) ===
+if (typeof document !== 'undefined' && !document.getElementById('product-detail-anim')) {
+  const styleEl = document.createElement('style');
+  styleEl.id = 'product-detail-anim';
+  styleEl.textContent = `
+    @keyframes pdLivePulseKey {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+  `;
+  document.head.appendChild(styleEl);
+}
+
 // ─── 표시 라벨 매핑 ────────────────────────────────────────────────
 const PRODUCT_TYPE_LABELS = {
   KEYBOARD: '키보드',
@@ -35,7 +48,7 @@ const LAYOUT_LABELS = {
   '40': '40%',
 };
 
-// ─── 인증 헬퍼 (5-A 미완 - 임시 localStorage 기반) ──────────────────
+// ─── 인증 헬퍼 ──────────────────────────────────
 function getAuthToken() {
   return localStorage.getItem('accessToken');
 }
@@ -118,6 +131,40 @@ function Toast({ message, visible }) {
   );
 }
 
+// === HotdealCountdown — endAt 기반 카운트다운 (Phase 7 Round 4, 5/18) ===
+function HotdealCountdown({ endAt }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  if (!endAt) return null;
+  const endMs = new Date(endAt + 'Z').getTime();
+  const remainMs = endMs - now;
+  if (remainMs <= 0) {
+    return (
+      <div style={{ ...S.countdownBox, background: '#f3f4f6', borderColor: '#d1d5db' }}>
+        <span style={{ ...S.countdownLabel, color: '#6b7280' }}>경매 종료됨</span>
+      </div>
+    );
+  }
+  const s = Math.floor(remainMs / 1000);
+  const days = Math.floor(s / 86400);
+  const hours = Math.floor((s % 86400) / 3600);
+  const minutes = Math.floor((s % 3600) / 60);
+  const seconds = s % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  const text = days > 0
+    ? `${days}일 ${pad(hours)} : ${pad(minutes)} : ${pad(seconds)}`
+    : `${pad(hours)} : ${pad(minutes)} : ${pad(seconds)}`;
+  return (
+    <div style={S.countdownBox}>
+      <span style={S.countdownLabel}>⏰ 남은 시간</span>
+      <span style={S.countdownValue}>{text}</span>
+    </div>
+  );
+}
+
 // ─── 메인 ProductDetail ──────────────────────────────────────────
 export default function ProductDetail() {
   const { id } = useParams();
@@ -126,33 +173,23 @@ export default function ProductDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // ─── Like 상태 ────────────────────────────────────────────
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
   const [likeBusy, setLikeBusy] = useState(false);
 
-  // ─── Wishlist 상태 ────────────────────────────────────────
   const [wished, setWished] = useState(false);
   const [wishBusy, setWishBusy] = useState(false);
 
-  // ─── QnA 모달 상태 (5-H C3) ──────────────────────────────
   const [qnaModalOpen, setQnaModalOpen] = useState(false);
   const [qnaRefetchKey, setQnaRefetchKey] = useState(0);
 
-  // ─── Review 모달 상태 (5-H C2) ──────────────────────────
-  // C3 와 동일한 패턴 — modal open + refetchKey++ trigger.
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [reviewRefetchKey, setReviewRefetchKey] = useState(0);
 
-  // ─── 토스트 ──────────────────────────────────────────────
   const [toast, setToast] = useState({ message: '', visible: false });
 
-  // ─── Flash Deal (5/17 라운드 4) ─────────────────────────────
-  // 현재 상품의 ACTIVE 경매 정보 (없으면 null). startPrice 가 이미 할인된 가격.
-  // 정가는 product.price.
   const [activeAuction, setActiveAuction] = useState(null);
 
-  // ─── 상품 데이터 fetch ────────────────────────────────────
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
@@ -176,9 +213,6 @@ export default function ProductDetail() {
     return () => controller.abort();
   }, [id]);
 
-  // ─── Flash Deal fetch ──────────────────────────────────────
-  // GET /api/auctions/active/by-product/{id} — 200 + Detail or 204 No Content.
-  // 핫딜 없는 일반 상품도 정상 (204 → activeAuction=null 유지).
   useEffect(() => {
     if (!id) return;
     const controller = new AbortController();
@@ -201,7 +235,6 @@ export default function ProductDetail() {
     return () => controller.abort();
   }, [id]);
 
-  // ─── 좋아요 카운트 fetch (비로그인도 가능) ────────────────────
   useEffect(() => {
     const controller = new AbortController();
     fetch(`${API_BASE}/products/${id}/like/count`, { signal: controller.signal })
@@ -217,14 +250,12 @@ export default function ProductDetail() {
     return () => controller.abort();
   }, [id]);
 
-  // ─── 토스트 표시 ──────────────────────────────────────────
   function showToast(message) {
     setToast({ message, visible: true });
     setTimeout(() => setToast((t) => ({ ...t, visible: false })), 1800);
     setTimeout(() => setToast({ message: '', visible: false }), 2200);
   }
 
-  // ─── 좋아요 토글 (낙관적 업데이트 + 401 롤백) ───────────────
   async function handleToggleLike() {
     if (!isLoggedIn()) {
       showToast('로그인이 필요합니다');
@@ -272,7 +303,6 @@ export default function ProductDetail() {
     }
   }
 
-  // ─── 찜 토글 ───────────────────────────────────────────────
   async function handleToggleWish() {
     if (!isLoggedIn()) {
       showToast('로그인이 필요합니다');
@@ -313,7 +343,6 @@ export default function ProductDetail() {
     }
   }
 
-  // ─── 핸들러: 구매/장바구니 (placeholder) ──────────────────
   function handleBuy() {
     showToast('구매 페이지 준비 중입니다');
   }
@@ -326,7 +355,6 @@ export default function ProductDetail() {
     window.open(`/builder/${id}`, '_blank', 'width=1400,height=900');
   }
 
-  // ─── Q&A 질문하기 (5-H C3) ────────────────────────────────
   function handleRequestQnAWrite() {
     if (!isLoggedIn()) {
       showToast('로그인이 필요합니다');
@@ -341,7 +369,6 @@ export default function ProductDetail() {
     showToast('질문이 등록되었습니다');
   }
 
-  // ─── 리뷰 작성 (5-H C2) — C3 패턴 그대로 ─────────────────
   function handleRequestReviewWrite() {
     if (!isLoggedIn()) {
       showToast('로그인이 필요합니다');
@@ -356,7 +383,6 @@ export default function ProductDetail() {
     showToast('리뷰가 등록되었습니다');
   }
 
-  // ─── 로딩 / 에러 ──────────────────────────────────────────
   if (loading) {
     return (
       <div style={S.page}>
@@ -381,7 +407,6 @@ export default function ProductDetail() {
     );
   }
 
-  // ─── 메인 렌더 ────────────────────────────────────────────
   const hasGlb = Boolean(product.glbUrl) && product.productType === 'KEYBOARD';
 
   return (
@@ -446,6 +471,37 @@ export default function ProductDetail() {
                   <span style={S.priceOriginal}>
                     ₩{(product.price || 0).toLocaleString()}
                   </span>
+                </div>
+
+                {/* === Phase 7 Round 4 (5/18) - 사회적 증명 시각 신호 4종 === */}
+                <div style={S.hotdealSignalBox}>
+                  <div style={S.liveBanner}>
+                    <span style={S.livePulseDot} />
+                    <span style={S.liveBannerText}>LIVE 경매 진행중</span>
+                  </div>
+                  <HotdealCountdown endAt={activeAuction.endAt} />
+                  <div style={S.statsRow}>
+                    <div style={S.statBox}>
+                      <span style={S.statIcon}>📣</span>
+                      <span style={S.statNum}>{activeAuction.bidCount || 0}</span>
+                      <span style={S.statText}>입찰</span>
+                    </div>
+                    <div style={S.statBox}>
+                      <span style={S.statIcon}>👁</span>
+                      <span style={S.statNum}>{(activeAuction.viewCount || 0).toLocaleString()}</span>
+                      <span style={S.statText}>조회</span>
+                    </div>
+                    <div style={S.statBox}>
+                      <span style={S.statIcon}>❤️</span>
+                      <span style={{ ...S.statNum, color: (activeAuction.watchCount || 0) > 0 ? '#ef4444' : '#18181b' }}>
+                        {activeAuction.watchCount || 0}
+                      </span>
+                      <span style={S.statText}>관심</span>
+                    </div>
+                  </div>
+                  <Link to={`/auctions/${activeAuction.id}`} style={S.gotoBidBtn}>
+                    🔥 입찰하러 가기  →
+                  </Link>
                 </div>
               </div>
             ) : (
@@ -521,7 +577,6 @@ export default function ProductDetail() {
           </div>
         </div>
 
-        {/* 5-H C1-b + C2 + C3: 4-tab nav (sticky) + Review/Q&A 모달 트리거 */}
         <ProductTabs
           product={product}
           productId={product.id}
@@ -532,7 +587,6 @@ export default function ProductDetail() {
         />
       </div>
 
-      {/* 5-H C3: Q&A 작성 모달 */}
       {qnaModalOpen && (
         <QnAFormModal
           productId={product.id}
@@ -541,7 +595,6 @@ export default function ProductDetail() {
         />
       )}
 
-      {/* 5-H C2: 리뷰 작성 모달 */}
       {reviewModalOpen && (
         <ReviewFormModal
           productId={product.id}
@@ -555,7 +608,6 @@ export default function ProductDetail() {
   );
 }
 
-// ─── 스타일 ────────────────────────────────────────────────────
 const S = {
   page: {
     fontFamily: "'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif",
@@ -563,267 +615,148 @@ const S = {
     minHeight: '100vh',
     padding: '24px 0',
   },
-  container: {
-    maxWidth: 1200,
-    margin: '0 auto',
-    padding: '0 24px',
-  },
-  statusWrap: {
-    maxWidth: 1200,
-    margin: '0 auto',
-    padding: '60px 24px',
-    textAlign: 'center',
-  },
-  statusText: {
-    marginTop: 16,
-    color: '#71717a',
-    fontSize: 14,
-  },
-  backLink: {
-    color: '#5A5855',
-    textDecoration: 'none',
-    fontSize: 13,
-    fontWeight: 500,
-  },
+  container: { maxWidth: 1200, margin: '0 auto', padding: '0 24px' },
+  statusWrap: { maxWidth: 1200, margin: '0 auto', padding: '60px 24px', textAlign: 'center' },
+  statusText: { marginTop: 16, color: '#71717a', fontSize: 14 },
+  backLink: { color: '#5A5855', textDecoration: 'none', fontSize: 13, fontWeight: 500 },
 
   breadcrumb: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 24,
-    fontSize: 13,
-    color: '#71717a',
-    overflow: 'hidden',
+    display: 'flex', alignItems: 'center', gap: 6, marginBottom: 24,
+    fontSize: 13, color: '#71717a', overflow: 'hidden',
   },
-  crumbLink: {
-    color: '#71717a',
-    textDecoration: 'none',
-    flexShrink: 0,
-  },
-  crumbSep: {
-    color: '#d4d4d8',
-    flexShrink: 0,
-  },
+  crumbLink: { color: '#71717a', textDecoration: 'none', flexShrink: 0 },
+  crumbSep: { color: '#d4d4d8', flexShrink: 0 },
   crumbCurrent: {
-    color: '#18181b',
-    fontWeight: 500,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    minWidth: 0,
+    color: '#18181b', fontWeight: 500, overflow: 'hidden',
+    textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
   },
 
   layout: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr)',
-    gap: 48,
-    alignItems: 'start',
+    display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr)',
+    gap: 48, alignItems: 'start',
   },
-  imageColumn: {
-    position: 'sticky',
-    top: 24,
-  },
-  infoColumn: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 20,
-  },
-  titleRow: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 16,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: 600,
-    color: '#18181b',
-    margin: 0,
-    lineHeight: 1.4,
-    flex: 1,
-  },
+  imageColumn: { position: 'sticky', top: 24 },
+  infoColumn: { display: 'flex', flexDirection: 'column', gap: 20 },
+  titleRow: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 },
+  title: { fontSize: 22, fontWeight: 600, color: '#18181b', margin: 0, lineHeight: 1.4, flex: 1 },
 
   likeTopBtn: {
-    border: '1px solid #e4e4e7',
-    borderRadius: 8,
-    padding: '6px 12px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    flexShrink: 0,
-    transition: 'all 0.15s',
+    border: '1px solid #e4e4e7', borderRadius: 8, padding: '6px 12px',
+    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+    flexShrink: 0, transition: 'all 0.15s',
   },
-  likeTopCount: {
-    fontSize: 13,
-    fontWeight: 500,
-  },
+  likeTopCount: { fontSize: 13, fontWeight: 500 },
 
-  priceBlock: {
-    marginBottom: '20px',
-  },
-  hotdealBadgeRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    marginBottom: '8px',
-  },
+  priceBlock: { marginBottom: '20px' },
+  hotdealBadgeRow: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' },
   hotdealBadge: {
-    display: 'inline-block',
-    padding: '4px 12px',
-    background: '#ef4444',
-    color: '#fff',
-    borderRadius: '4px',
-    fontSize: '13px',
-    fontWeight: 700,
+    display: 'inline-block', padding: '4px 12px', background: '#ef4444',
+    color: '#fff', borderRadius: '4px', fontSize: '13px', fontWeight: 700,
     letterSpacing: '-0.01em',
   },
   discountBadge: {
-    display: 'inline-block',
-    padding: '4px 10px',
-    background: '#fff',
-    color: '#ef4444',
-    border: '1.5px solid #ef4444',
-    borderRadius: '4px',
-    fontSize: '13px',
-    fontWeight: 700,
+    display: 'inline-block', padding: '4px 10px', background: '#fff',
+    color: '#ef4444', border: '1.5px solid #ef4444', borderRadius: '4px',
+    fontSize: '13px', fontWeight: 700,
   },
-  priceRow: {
-    display: 'flex',
-    alignItems: 'baseline',
-    gap: '12px',
-    flexWrap: 'wrap',
-  },
-  priceDiscounted: {
-    fontSize: '32px',
-    fontWeight: 700,
-    color: '#ef4444',
-    letterSpacing: '-0.02em',
-  },
+  priceRow: { display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' },
+  priceDiscounted: { fontSize: '32px', fontWeight: 700, color: '#ef4444', letterSpacing: '-0.02em' },
   priceOriginal: {
-    fontSize: '16px',
-    color: '#999',
-    textDecoration: 'line-through',
+    fontSize: '16px', color: '#999', textDecoration: 'line-through',
     textDecorationThickness: '1px',
   },
-  price: {
-    fontSize: 28,
-    fontWeight: 700,
-    color: '#18181b',
-    margin: '4px 0',
+  price: { fontSize: 28, fontWeight: 700, color: '#18181b', margin: '4px 0' },
+
+  // === Phase 7 Round 4 (5/18) - 핫딜 시각 신호 ===
+  hotdealSignalBox: {
+    marginTop: 14, padding: 14, background: '#fff7f7',
+    border: '1px solid #fecaca', borderRadius: 10,
+    display: 'flex', flexDirection: 'column', gap: 10,
+  },
+  liveBanner: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    padding: '6px 10px', background: '#fff',
+    border: '1px solid #fecaca', borderRadius: 6,
+  },
+  livePulseDot: {
+    width: 8, height: 8, borderRadius: '50%', background: '#ef4444',
+    animation: 'pdLivePulseKey 1.4s ease-in-out infinite', flexShrink: 0,
+  },
+  liveBannerText: { fontSize: 12, fontWeight: 700, color: '#791f1f', letterSpacing: '0.03em' },
+  countdownBox: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '8px 14px', background: '#fef2f2',
+    border: '1px solid #fecaca', borderRadius: 6,
+  },
+  countdownLabel: { fontSize: 11, fontWeight: 700, color: '#791f1f', letterSpacing: '0.05em' },
+  countdownValue: {
+    fontSize: 22, fontWeight: 800, color: '#a32d2d',
+    fontFamily: 'monospace', letterSpacing: '0.03em', fontVariantNumeric: 'tabular-nums',
+  },
+  statsRow: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 },
+  statBox: {
+    display: 'flex', flexDirection: 'column', alignItems: 'center',
+    padding: '8px 4px', background: '#fff',
+    border: '1px solid #fecaca', borderRadius: 6, gap: 2,
+  },
+  statIcon: { fontSize: 14 },
+  statNum: {
+    fontSize: 15, fontWeight: 800, color: '#18181b',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  statText: { fontSize: 10, color: '#71717a' },
+  gotoBidBtn: {
+    display: 'block', textAlign: 'center',
+    padding: '12px 14px', background: '#ef4444', color: '#fff',
+    fontSize: 14, fontWeight: 700, border: 'none', borderRadius: 8,
+    textDecoration: 'none', letterSpacing: '0.01em', transition: 'all 0.15s',
   },
 
-  chipRow: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: 6,
-    margin: '4px 0 8px',
-  },
+  chipRow: { display: 'flex', flexWrap: 'wrap', gap: 6, margin: '4px 0 8px' },
   chip: {
-    fontSize: 12,
-    fontWeight: 500,
-    color: '#52525b',
-    background: '#f4f4f5',
-    padding: '4px 10px',
-    borderRadius: 12,
+    fontSize: 12, fontWeight: 500, color: '#52525b',
+    background: '#f4f4f5', padding: '4px 10px', borderRadius: 12,
   },
 
   metaBox: {
-    background: '#fff',
-    border: '1px solid #e4e4e7',
-    borderRadius: 8,
-    padding: '14px 16px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 8,
+    background: '#fff', border: '1px solid #e4e4e7', borderRadius: 8,
+    padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8,
   },
-  metaRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    fontSize: 13,
-  },
-  metaLabel: {
-    color: '#71717a',
-  },
-  metaValue: {
-    color: '#18181b',
-    fontWeight: 500,
-  },
+  metaRow: { display: 'flex', justifyContent: 'space-between', fontSize: 13 },
+  metaLabel: { color: '#71717a' },
+  metaValue: { color: '#18181b', fontWeight: 500 },
 
   previewBtn: {
-    width: '100%',
-    padding: '12px 16px',
-    fontSize: 14,
-    fontWeight: 500,
-    color: '#6366f1',
-    background: '#eef2ff',
-    border: '1px solid #c7d2fe',
-    borderRadius: 8,
-    cursor: 'pointer',
-    transition: 'all 0.15s',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: '100%', padding: '12px 16px', fontSize: 14, fontWeight: 500,
+    color: '#6366f1', background: '#eef2ff', border: '1px solid #c7d2fe',
+    borderRadius: 8, cursor: 'pointer', transition: 'all 0.15s',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
 
-  ctaRow: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: 8,
-  },
+  ctaRow: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 },
   buyBtn: {
-    padding: '14px',
-    fontSize: 15,
-    fontWeight: 600,
-    color: '#fff',
-    background: '#18181b',
-    border: 'none',
-    borderRadius: 8,
-    cursor: 'pointer',
-    transition: 'all 0.15s',
+    padding: '14px', fontSize: 15, fontWeight: 600, color: '#fff',
+    background: '#18181b', border: 'none', borderRadius: 8,
+    cursor: 'pointer', transition: 'all 0.15s',
   },
   cartBtn: {
-    padding: '14px',
-    fontSize: 15,
-    fontWeight: 600,
-    color: '#18181b',
-    background: '#fff',
-    border: '1px solid #d4d4d8',
-    borderRadius: 8,
-    cursor: 'pointer',
-    transition: 'all 0.15s',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    padding: '14px', fontSize: 15, fontWeight: 600, color: '#18181b',
+    background: '#fff', border: '1px solid #d4d4d8', borderRadius: 8,
+    cursor: 'pointer', transition: 'all 0.15s',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
 
   wishBtn: {
-    width: '100%',
-    padding: '12px',
-    fontSize: 14,
-    fontWeight: 500,
-    border: '1px solid #e4e4e7',
-    borderRadius: 8,
-    cursor: 'pointer',
-    transition: 'all 0.15s',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: '100%', padding: '12px', fontSize: 14, fontWeight: 500,
+    border: '1px solid #e4e4e7', borderRadius: 8, cursor: 'pointer',
+    transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
 
   toast: {
-    position: 'fixed',
-    bottom: 40,
-    left: '50%',
-    background: 'rgba(24,24,27,0.92)',
-    color: '#fff',
-    padding: '12px 24px',
-    borderRadius: 8,
-    fontSize: 14,
-    fontWeight: 500,
-    zIndex: 1000,
-    transition: 'all 0.3s',
-    pointerEvents: 'none',
+    position: 'fixed', bottom: 40, left: '50%',
+    background: 'rgba(24,24,27,0.92)', color: '#fff',
+    padding: '12px 24px', borderRadius: 8, fontSize: 14, fontWeight: 500,
+    zIndex: 1000, transition: 'all 0.3s', pointerEvents: 'none',
     boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
   },
 };

@@ -12,6 +12,12 @@ import java.time.LocalDateTime;
  *    두 스레드가 동시에 같은 currentPrice 를 읽고 각각 +1000 시도하면
  *    JPA 가 version 충돌 감지 → OptimisticLockingFailureException 발생.
  *    Controller 에서 catch + retry 로 처리.
+ *
+ * Phase 7 Round 4 (5/18) 변경:
+ *  - viewCount / watchCount 필드 추가 (V11 컬럼) — 사회적 증명용.
+ *  - viewCount: AuctionDetailPage 페이지 진입 시 +1 (POST /auctions/{id}/view).
+ *  - watchCount: 관심 등록 토글 시 +1/-1 (POST /auctions/{id}/watch).
+ *    auction_watches 테이블의 UNIQUE(user_id, auction_id) 와 함께 동작.
  */
 @Entity
 @Table(name = "auctions")
@@ -97,6 +103,27 @@ public class Auction {
     private LocalDateTime startAt;
     // ──────────────────────────────────────────────────────────────
 
+    // ─── Social Proof 카운터 (V11, 5/18, Phase 7 Round 4) ─────────
+    /**
+     * 조회수.
+     * AuctionDetailPage 페이지 진입 시 +1 (POST /auctions/{id}/view).
+     * 비로그인 사용자도 카운트 (단순 카운터).
+     */
+    @Column(name = "view_count", nullable = false)
+    @Builder.Default
+    private Long viewCount = 0L;
+
+    /**
+     * 관심 등록 수.
+     * 사용자가 관심 등록 시 +1, 해제 시 -1.
+     * auction_watches 테이블의 행 수와 동기화됨.
+     * UNIQUE(user_id, auction_id) 제약으로 한 사용자당 최대 1번.
+     */
+    @Column(name = "watch_count", nullable = false)
+    @Builder.Default
+    private Long watchCount = 0L;
+    // ──────────────────────────────────────────────────────────────
+
     /**
      * 낙관적 락 버전 (Phase 7 WebSocket, 5/12).
      * JPA 가 자동으로 UPDATE 시 WHERE version=? 추가 + version+1.
@@ -112,6 +139,8 @@ public class Auction {
         if (this.status == null) this.status = Status.ACTIVE;
         if (this.currentPrice == 0) this.currentPrice = this.startPrice;
         if (this.version == null) this.version = 0L;
+        if (this.viewCount == null) this.viewCount = 0L;
+        if (this.watchCount == null) this.watchCount = 0L;
     }
 
     public enum Condition {

@@ -1,12 +1,13 @@
 // frontend/src/api/auction.js
 // Phase 7 (5/17 update) - 경매 REST API 클라이언트.
+// Phase 7 Round 4 (5/18 update) - view/watch 풀스택 함수 2개 추가.
 //
 // 5/17 18:25 fix: axios 직접 호출 → apiClient 인터셉터 패턴으로 통일
 //   - JWT 자동 첨부 (Zustand authStore)
 //   - 401 → refresh 자동 처리
 //   - baseURL 통일 (client.js 환경변수)
 //
-// 사용자용 함수 3개 + 관리자용 함수 8개.
+// 사용자용 함수 5개 + 관리자용 함수 8개.
 // 입찰 자체는 WebSocket (STOMP) 으로 분리.
 
 import apiClient from './client';
@@ -27,6 +28,31 @@ export async function listAuctionBids(id, limit = 50) {
   const res = await apiClient.get(`/auctions/${id}/bids`, {
     params: { limit },
   });
+  return res.data;
+}
+
+/**
+ * 조회수 +1 (Phase 7 Round 4, 5/18).
+ * AuctionDetailPage 진입 시 useEffect 에서 호출.
+ * 비로그인 사용자도 호출 가능 (인증 불필요).
+ *
+ * @param id 경매 ID
+ * @returns { viewCount: number } 갱신된 조회수
+ */
+export async function incrementAuctionView(id) {
+  const res = await apiClient.post(`/auctions/${id}/view`);
+  return res.data;
+}
+
+/**
+ * 관심 등록 토글 (Phase 7 Round 4, 5/18).
+ * 인증 필수 (apiClient 인터셉터가 401 시 refresh 자동 처리).
+ *
+ * @param id 경매 ID
+ * @returns { watched: boolean, watchCount: number }
+ */
+export async function toggleAuctionWatch(id) {
+  const res = await apiClient.post(`/auctions/${id}/watch`);
   return res.data;
 }
 

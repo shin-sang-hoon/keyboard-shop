@@ -27,6 +27,9 @@ public class AuctionDto {
         private LocalDateTime createdAt;
         private Boolean isFlashDeal;
         private Integer startPricePercent;
+        // Phase 7 Round 4 (5/18) 사회적 증명 신호 - 목록 카드에서도 노출
+        private Long viewCount;
+        private Long watchCount;
 
         public static ListItem from(Auction a) {
             return ListItem.builder()
@@ -42,6 +45,8 @@ public class AuctionDto {
                     .isFlashDeal(Boolean.TRUE.equals(a.getIsFlashDeal()))
                     .startPricePercent(a.getStartPricePercent())
                     .createdAt(a.getCreatedAt())
+                    .viewCount(a.getViewCount() != null ? a.getViewCount() : 0L)
+                    .watchCount(a.getWatchCount() != null ? a.getWatchCount() : 0L)
                     .build();
         }
     }
@@ -67,8 +72,13 @@ public class AuctionDto {
         private List<BidItem> recentBids;
         private Boolean isFlashDeal;
         private Integer startPricePercent;
+        // Phase 7 Round 4 (5/18) 사회적 증명 신호
+        private Long viewCount;
+        private Long watchCount;
+        // 현재 사용자가 관심 등록했는지 (로그인 사용자만 의미있음)
+        private Boolean isWatchedByMe;
 
-        public static Detail from(Auction a, List<BidItem> recentBids, int totalBidCount) {
+        public static Detail from(Auction a, List<BidItem> recentBids, int totalBidCount, boolean watchedByMe) {
             return Detail.builder()
                     .id(a.getId())
                     .productId(a.getProduct() != null ? a.getProduct().getId() : null)
@@ -87,15 +97,26 @@ public class AuctionDto {
                     .sellerName(a.getSeller() != null ? a.getSeller().getName() : null)
                     .bidCount(totalBidCount)
                     .recentBids(recentBids)
+                    .viewCount(a.getViewCount() != null ? a.getViewCount() : 0L)
+                    .watchCount(a.getWatchCount() != null ? a.getWatchCount() : 0L)
+                    .isWatchedByMe(watchedByMe)
                     .build();
         }
 
         /**
-         * 입찰 정보 없이 단순 조회용 오버로드.
+         * 입찰 정보 없이 단순 조회용 오버로드 (비로그인 또는 단순 조회).
          * ProductDetail 페이지의 ACTIVE 핫딜 조회에서 사용 (입찰 내역 불필요).
+         * watchedByMe = false 로 기본 설정.
          */
         public static Detail from(Auction a) {
-            return from(a, java.util.Collections.emptyList(), 0);
+            return from(a, java.util.Collections.emptyList(), 0, false);
+        }
+
+        /**
+         * recentBids + bidCount 있고 watchedByMe 없는 호출용 (하위 호환).
+         */
+        public static Detail from(Auction a, List<BidItem> recentBids, int totalBidCount) {
+            return from(a, recentBids, totalBidCount, false);
         }
     }
 
