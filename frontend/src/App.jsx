@@ -28,6 +28,7 @@ import AuctionListPage from './pages/AuctionListPage';
 import AuctionDetailPage from './pages/AuctionDetailPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import Header from './components/Header';
+import CartSyncEffect from './components/CartSyncEffect';
 import RecentlyViewedSidebar from './components/RecentlyViewedSidebar';
 import Footer from './components/Footer';
 import { useCartStore } from './stores/cartStore';
@@ -42,6 +43,8 @@ function ConditionalChrome({ children }) {
   const hide = CHROME_HIDDEN_PATHS.some((p) => location.pathname.startsWith(p));
   return hide ? null : children;
 }
+
+import CartPage from './pages/CartPage';
 
 // === Cart placeholder (5-D에서 본격 구현) ===
 function CartPlaceholder() {
@@ -65,6 +68,7 @@ function App() {
     <BrowserRouter>
       <ConditionalChrome><Header /></ConditionalChrome>
       <ConditionalChrome><RecentlyViewedSidebar /></ConditionalChrome>
+      <CartSyncEffect />
       <Routes>
         {/* 메인 - 5-B 라운드 3-D 신규 HomePage */}
         <Route path="/" element={<HomePage />} />
@@ -119,7 +123,7 @@ function App() {
         <Route path="/auth/kakao/success" element={<KakaoCallbackPage />} />
 
         {/* 5-D 장바구니/주문 - placeholder */}
-        <Route path="/cart" element={<CartPlaceholder />} />
+        <Route path="/cart" element={<CartPage />} />
 
         {/* 약관 - placeholder (Phase 8 배포 시 실제 콘텐츠) */}
         <Route
