@@ -24,6 +24,8 @@ import NoticeDetailPage from './pages/NoticeDetailPage';
 import KakaoCallbackPage from './pages/KakaoCallbackPage';
 import AdminAuditLogPage from './pages/admin/AdminAuditLogPage';
 import AdminFlashDealPage from './pages/admin/AdminFlashDealPage';
+import AdminLayout from './components/admin/AdminLayout';
+import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import AuctionListPage from './pages/AuctionListPage';
 import AuctionDetailPage from './pages/AuctionDetailPage';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -103,22 +105,20 @@ function App() {
 
         {/* Phase 7 [9-2B] - 감사 로그 뷰어 (ADMIN role 가드).
             ProtectedRoute 가 비로그인 시 /login 으로, role 검사로 ADMIN 만 통과. */}
+        {/* Phase 7-G - 관리자 통합 Hub (nested route, 가드는 /admin 한 곳에만) */}
         <Route
-          path="/admin/audit-logs"
+          path="/admin"
           element={
             <ProtectedRoute requireRole="ADMIN">
-              <AdminAuditLogPage />
+              <AdminLayout />
             </ProtectedRoute>
           }
-        />
-        <Route
-          path="/admin/flash-deals"
-          element={
-            <ProtectedRoute requireRole="ADMIN">
-              <AdminFlashDealPage />
-            </ProtectedRoute>
-          }
-        />
+        >
+          <Route index element={<AdminDashboardPage />} />
+          <Route path="dashboard" element={<AdminDashboardPage />} />
+          <Route path="flash-deals" element={<AdminFlashDealPage />} />
+          <Route path="audit-logs" element={<AdminAuditLogPage />} />
+        </Route>
 
         {/* 5-B Day 2 신규 - 카카오 OAuth 콜백 */}
         <Route path="/auth/kakao/success" element={<KakaoCallbackPage />} />
