@@ -1,15 +1,61 @@
 // frontend/src/pages/admin/AdminDashboardPage.jsx
 //
-// Phase 7-G (2026-05-21) — 관리자 대시보드.
+// Phase 7-G — 관리자 대시보드.
 //
-// 라운드 1: 레이아웃 검증용 임시 화면 (통계 카드 자리만).
-// 라운드 3: GET /api/admin/stats 연결 + Recharts 추이 차트.
+// 라운드 1 (5/21): 레이아웃 검증용 임시 화면 (통계 카드 자리만).
+// 라운드 3 (5/24): GET /api/admin/stats 연결 — 카드 4개 실제 숫자.
+//                  (막대바 차트는 카드 숫자와 중복이라 제거 — 심플 관리자 UI 지향.)
 //
 // 디자인: swagkey 화이트 톤.
+//
+// 상태 처리: loading / error / success 3-상태.
+//   - loading: 카드 값 자리에 "..." 스켈레톤
+//   - error:   상단 빨간 배너 + 카드는 "—" 유지
+//   - success: 실제 숫자 렌더
 
+import { useState, useEffect } from 'react';
 import { colors, typography, spacing, radius, shadow } from '../../styles/tokens';
+import { adminStatsApi } from '../../api/adminStats';
 
 export default function AdminDashboardPage() {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const data = await adminStatsApi.getStats();
+        if (alive) {
+          setStats(data);
+          setError(null);
+        }
+      } catch (e) {
+        if (alive) {
+          setError('통계를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+        }
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  // 카드 메타 + stats 키 매핑
+  const cards = [
+    { key: 'activeProductCount', label: '판매중 상품', hint: 'ACTIVE 상태' },
+    { key: 'totalUserCount',     label: '전체 회원',   hint: 'USER + ADMIN' },
+    { key: 'reviewCount',        label: '누적 리뷰',   hint: '구매 인증 리뷰' },
+    { key: 'orderCount',         label: '누적 주문',   hint: '주문 건수' },
+  ];
+
+  const renderValue = (key) => {
+    if (loading) return '...';
+    if (error || !stats) return '—';
+    return (stats[key] ?? 0).toLocaleString();
+  };
+
   return (
     <div>
       <div style={S.intro}>
@@ -19,30 +65,26 @@ export default function AdminDashboardPage() {
         </p>
       </div>
 
-      {/* 통계 카드 자리 — 라운드 3에서 실제 데이터 연결 */}
+      {/* 에러 배너 */}
+      {error && (
+        <div style={S.errorBanner}>{error}</div>
+      )}
+
+      {/* 통계 카드 4개 */}
       <div style={S.cardGrid}>
-        {STAT_PLACEHOLDERS.map((stat) => (
-          <div key={stat.label} style={S.card}>
-            <div style={S.cardLabel}>{stat.label}</div>
-            <div style={S.cardValue}>—</div>
-            <div style={S.cardHint}>{stat.hint}</div>
+        {cards.map((c) => (
+          <div key={c.key} style={S.card}>
+            <div style={S.cardLabel}>{c.label}</div>
+            <div style={{ ...S.cardValue, color: error ? colors.textOnLightDim : colors.textOnLight }}>
+              {renderValue(c.key)}
+            </div>
+            <div style={S.cardHint}>{c.hint}</div>
           </div>
         ))}
-      </div>
-
-      <div style={S.notice}>
-        통계 데이터는 다음 단계(7-G 라운드 3)에서 <code style={S.code}>GET /api/admin/stats</code> 연결 시 표시됩니다.
       </div>
     </div>
   );
 }
-
-const STAT_PLACEHOLDERS = [
-  { label: '판매중 상품', hint: 'ACTIVE 상태' },
-  { label: '전체 회원', hint: 'USER + ADMIN' },
-  { label: '누적 리뷰', hint: '구매 인증 리뷰' },
-  { label: '누적 주문', hint: '주문 건수' },
-];
 
 const S = {
   intro: {
@@ -60,11 +102,19 @@ const S = {
     color: colors.textOnLightDim,
     margin: 0,
   },
+  errorBanner: {
+    background: '#fef2f2',
+    border: '1px solid #fecaca',
+    color: '#dc2626',
+    borderRadius: radius.md,
+    padding: `${spacing[3]} ${spacing[4]}`,
+    fontSize: typography.fontSize.sm,
+    marginBottom: spacing[5],
+  },
   cardGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(4, 1fr)',
     gap: spacing[4],
-    marginBottom: spacing[6],
   },
   card: {
     background: colors.white,
@@ -89,21 +139,5 @@ const S = {
     fontSize: typography.fontSize.xs,
     color: colors.textOnLightDim,
     marginTop: spacing[2],
-  },
-  notice: {
-    background: colors.surfaceMuted,
-    border: `1px solid ${colors.borderLight}`,
-    borderRadius: radius.md,
-    padding: `${spacing[3]} ${spacing[4]}`,
-    fontSize: typography.fontSize.sm,
-    color: colors.textOnLightDim,
-  },
-  code: {
-    fontFamily: typography.fontFamily.mono,
-    background: colors.white,
-    padding: '2px 6px',
-    borderRadius: radius.sm,
-    fontSize: typography.fontSize.xs,
-    color: colors.accent,
   },
 };

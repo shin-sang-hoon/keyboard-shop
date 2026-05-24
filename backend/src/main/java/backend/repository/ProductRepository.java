@@ -75,6 +75,13 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             @Param("status") ProductStatus status,
             Pageable pageable);
 
+    // ─── 7-G 라운드 3 (5/24): 관리자 대시보드 통계 ──────────────────────
+    /**
+     * 상태별 상품 개수. Spring Data JPA 메서드명 파생 쿼리.
+     * AdminStatsService 가 ProductStatus.ACTIVE 로 호출 → 판매중 상품 수.
+     */
+    long countByStatus(ProductStatus status);
+
     // ─── Flash Deal 임계값 (5/17) ──────────────────────────────────
     /**
      * KEYBOARD ACTIVE 총 개수.
