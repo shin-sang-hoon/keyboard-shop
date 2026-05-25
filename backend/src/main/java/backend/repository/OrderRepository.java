@@ -2,10 +2,36 @@ package backend.repository;
 
 import backend.entity.Order;
 import backend.entity.User;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.List;
 
 public interface OrderRepository extends JpaRepository<Order, Long> {
     List<Order> findByUser(User user);
     List<Order> findByUserOrderByCreatedAtDesc(User user);
+
+    // ─── 7-G 라운드 6 (5/25): 관리자 주문 관리 ──────────────────────────
+    /**
+     * 관리자 주문 목록 — 전체 (status 필터 없음).
+     * @EntityGraph 로 user 만 fetch → 주문자 정보 N+1 방어.
+     *   items(컬렉션)는 fetch 하지 않는다 — 컬렉션 fetch + 페이징을 함께 쓰면
+     *   Hibernate 가 메모리에서 페이징(HHH90003004 경고)하기 때문.
+     *   목록은 "상품 N건" 요약만 필요하므로 items 는 LAZY 로 두고
+     *   Service 의 @Transactional 안에서 size() 만 호출한다.
+     */
+    @EntityGraph(attributePaths = {"user"})
+    Page<Order> findAllBy(Pageable pageable);
+
+    /**
+     * 관리자 주문 목록 — 특정 status 필터.
+     */
+    @EntityGraph(attributePaths = {"user"})
+    Page<Order> findByStatus(Order.OrderStatus status, Pageable pageable);
+
+    /**
+     * 상태별 주문 수 — 향후 통계용 (현재 미사용, 확장 대비).
+     */
+    long countByStatus(Order.OrderStatus status);
 }
