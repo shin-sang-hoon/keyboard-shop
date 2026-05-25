@@ -1,28 +1,27 @@
 // frontend/src/pages/admin/AdminNoticePage.jsx
 //
-// Phase 7-G 라운드 7 (2026-05-25) — 관리자 공지 관리. 7-G 마지막 라운드.
+// Phase 7-B (2026-05-25) — 관리자 공지 관리. 7-G 라운드 7 + 7-B 첨부 통합.
 //
 // 기능:
-//   - 공지 목록 테이블 (제목 / 고정 / 조회수 / 작성일 / 수정일 / 관리)
+//   - 공지 목록 테이블 (번호 / 고정 / 제목 / 조회수 / 작성일 / 수정일 / 관리)
 //   - 제목 검색 + 페이징
-//   - 등록 모달 (제목 / 본문 / 상단고정 체크)
-//   - 수정 모달 (상세 조회 후 폼 채움)
+//   - 등록 / 수정 모달 — 공용 NoticeFormModal 재사용 (제목·본문·상단고정 + 첨부 이미지)
 //   - 삭제 (confirm)
 //
-// 디자인: swagkey 화이트 톤. AdminUserPage / AdminProductPage / AdminOrderPage 동일 톤.
+// 7-B 변경: 자체 등록/수정 모달(MODAL/form/handleSave)을 제거하고
+//   공용 NoticeFormModal 로 교체. adminNotice.js 가 FormData multipart 로
+//   바뀌어 자체 모달의 JSON 호출로는 첨부를 못 보내기 때문 — 첨부 UI 가 들어간
+//   NoticeFormModal 하나로 메인/상세/관리자가 동일하게 동작한다 (DRY).
 //
+// 디자인: swagkey 화이트 톤. AdminUserPage / AdminProductPage / AdminOrderPage 동일 톤.
 // 정렬은 백엔드가 pinned DESC → id DESC 로 내려준다 (고정 공지 최상단).
 
 import { useState, useEffect, useCallback } from 'react';
 import { colors, typography, spacing, radius, shadow } from '../../styles/tokens';
 import { adminNoticeApi } from '../../api/adminNotice';
+import NoticeFormModal from '../../components/NoticeFormModal';
 
 const PAGE_SIZE = 20;
-
-// 모달 모드
-const MODAL = { CLOSED: 'CLOSED', CREATE: 'CREATE', EDIT: 'EDIT' };
-
-const EMPTY_FORM = { title: '', content: '', pinned: false };
 
 export default function AdminNoticePage() {
   const [data, setData] = useState(null);
@@ -34,12 +33,8 @@ export default function AdminNoticePage() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
 
-  // 모달
-  const [modal, setModal] = useState(MODAL.CLOSED);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [editId, setEditId] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState(null);
+  // 모달 — { mode: 'create' } | { mode: 'edit', id } | null
+  const [modal, setModal] = useState(null);
 
   // 삭제 중인 행
   const [deletingId, setDeletingId] = useState(null);
@@ -70,78 +65,26 @@ export default function AdminNoticePage() {
     if (e.key === 'Enter') handleSearch();
   };
 
-  // ─── 모달 열기 ───────────────────────────────────────────
-  const openCreate = () => {
-    setForm(EMPTY_FORM);
-    setEditId(null);
-    setFormError(null);
-    setModal(MODAL.CREATE);
-  };
+  // ─── 모달 ────────────────────────────────────────────────
+  const openCreate = () => setModal({ mode: 'create' });
+  const openEdit = (id) => setModal({ mode: 'edit', id });
+  const closeModal = () => setModal(null);
 
-  const openEdit = async (id) => {
-    setFormError(null);
-    setEditId(id);
-    setModal(MODAL.EDIT);
-    setForm(EMPTY_FORM);
-    try {
-      const detail = await adminNoticeApi.get(id);
-      setForm({
-        title: detail.title ?? '',
-        content: detail.content ?? '',
-        pinned: !!detail.pinned,
-      });
-    } catch (e) {
-      setFormError('공지 정보를 불러오지 못했습니다.');
-    }
-  };
-
-  const closeModal = () => {
-    if (saving) return;
-    setModal(MODAL.CLOSED);
-    setForm(EMPTY_FORM);
-    setEditId(null);
-    setFormError(null);
-  };
-
-  // ─── 저장 (등록 / 수정) ──────────────────────────────────
-  const handleSave = async () => {
-    if (!form.title.trim()) {
-      setFormError('제목을 입력해 주세요.');
-      return;
-    }
-    if (!form.content.trim()) {
-      setFormError('본문을 입력해 주세요.');
-      return;
-    }
-
-    setSaving(true);
-    setFormError(null);
-    try {
-      const body = {
-        title: form.title.trim(),
-        content: form.content,
-        pinned: form.pinned,
-      };
-      if (modal === MODAL.CREATE) {
-        await adminNoticeApi.create(body);
+  // 등록/수정 저장 완료 — 모달 닫고 목록 갱신.
+  const handleSaved = async () => {
+    const wasCreate = modal?.mode === 'create';
+    setModal(null);
+    // 등록이면 1페이지로 (검색 해제 후 최신 글 노출), 수정이면 현재 페이지 유지.
+    if (wasCreate) {
+      setSearch('');
+      setSearchInput('');
+      if (page === 0) {
+        await load();          // 이미 0페이지면 load 직접 호출
       } else {
-        await adminNoticeApi.update(editId, body);
+        setPage(0);            // page 변경이 load 트리거
       }
-      setModal(MODAL.CLOSED);
-      setForm(EMPTY_FORM);
-      setEditId(null);
-      // 등록이면 1페이지로, 수정이면 현재 페이지 유지
-      if (modal === MODAL.CREATE) {
-        setPage(0);
-        setSearch('');
-        setSearchInput('');
-      }
+    } else {
       await load();
-    } catch (e) {
-      const msg = e?.response?.data?.message || '저장에 실패했습니다.';
-      setFormError(msg);
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -185,7 +128,7 @@ export default function AdminNoticePage() {
       {/* 헤더 */}
       <div style={S.header}>
         <h2 style={S.title}>공지 관리</h2>
-        <p style={S.desc}>공지사항 등록 · 수정 · 삭제 · 상단 고정 · 제목 검색</p>
+        <p style={S.desc}>공지사항 등록 · 수정 · 삭제 · 상단 고정 · 첨부 이미지 · 제목 검색</p>
       </div>
 
       {/* 검색 + 등록 버튼 */}
@@ -302,71 +245,14 @@ export default function AdminNoticePage() {
         </div>
       )}
 
-      {/* ─── 등록 / 수정 모달 ─────────────────────────────── */}
-      {modal !== MODAL.CLOSED && (
-        <div style={S.overlay} onClick={closeModal}>
-          <div style={S.modal} onClick={(e) => e.stopPropagation()}>
-            <h3 style={S.modalTitle}>
-              {modal === MODAL.CREATE ? '공지 등록' : '공지 수정'}
-            </h3>
-
-            {formError && <div style={S.formError}>{formError}</div>}
-
-            <div style={S.field}>
-              <label style={S.label}>제목</label>
-              <input
-                type="text"
-                value={form.title}
-                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                placeholder="공지 제목"
-                maxLength={200}
-                style={S.input}
-              />
-            </div>
-
-            <div style={S.field}>
-              <label style={S.label}>본문</label>
-              <textarea
-                value={form.content}
-                onChange={(e) => setForm((f) => ({ ...f, content: e.target.value }))}
-                placeholder="공지 본문을 입력하세요"
-                rows={10}
-                style={S.textarea}
-              />
-            </div>
-
-            <div style={S.checkRow}>
-              <label style={S.checkLabel}>
-                <input
-                  type="checkbox"
-                  checked={form.pinned}
-                  onChange={(e) => setForm((f) => ({ ...f, pinned: e.target.checked }))}
-                  style={S.checkbox}
-                />
-                상단 고정 (목록 최상단에 노출)
-              </label>
-            </div>
-
-            <div style={S.modalActions}>
-              <button
-                type="button"
-                onClick={closeModal}
-                disabled={saving}
-                style={{ ...S.cancelBtn, ...(saving ? S.btnDisabled : {}) }}
-              >
-                취소
-              </button>
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={saving}
-                style={{ ...S.saveBtn, ...(saving ? S.btnDisabled : {}) }}
-              >
-                {saving ? '저장 중...' : (modal === MODAL.CREATE ? '등록' : '수정 저장')}
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* ─── 등록 / 수정 모달 — 공용 NoticeFormModal ─────────── */}
+      {modal && (
+        <NoticeFormModal
+          mode={modal.mode}
+          noticeId={modal.id}
+          onClose={closeModal}
+          onSaved={handleSaved}
+        />
       )}
     </div>
   );
@@ -540,119 +426,5 @@ const S = {
     fontSize: typography.fontSize.sm,
     color: colors.textOnLightDim,
     fontVariantNumeric: 'tabular-nums',
-  },
-
-  // ─── 모달 ───────────────────────────────────────────────
-  overlay: {
-    position: 'fixed',
-    top: 0, left: 0, right: 0, bottom: 0,
-    background: 'rgba(0, 0, 0, 0.45)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1000,
-    padding: spacing[4],
-  },
-  modal: {
-    background: colors.white,
-    borderRadius: radius.lg,
-    boxShadow: '0 12px 40px rgba(0, 0, 0, 0.25)',
-    width: '100%',
-    maxWidth: '560px',
-    maxHeight: '90vh',
-    overflowY: 'auto',
-    padding: spacing[6],
-  },
-  modalTitle: {
-    fontSize: typography.fontSize.lg,
-    fontWeight: typography.fontWeight.bold,
-    color: colors.textOnLight,
-    margin: 0,
-    marginBottom: spacing[4],
-  },
-  formError: {
-    background: '#fef2f2',
-    border: '1px solid #fecaca',
-    color: '#dc2626',
-    borderRadius: radius.md,
-    padding: `${spacing[2]} ${spacing[3]}`,
-    fontSize: typography.fontSize.sm,
-    marginBottom: spacing[3],
-  },
-  field: {
-    marginBottom: spacing[4],
-  },
-  label: {
-    display: 'block',
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
-    color: colors.textOnLight,
-    marginBottom: spacing[2],
-  },
-  input: {
-    width: '100%',
-    padding: `${spacing[2]} ${spacing[3]}`,
-    fontSize: typography.fontSize.sm,
-    color: colors.textOnLight,
-    background: colors.white,
-    border: `1px solid ${colors.borderLight}`,
-    borderRadius: radius.md,
-    outline: 'none',
-    boxSizing: 'border-box',
-  },
-  textarea: {
-    width: '100%',
-    padding: `${spacing[2]} ${spacing[3]}`,
-    fontSize: typography.fontSize.sm,
-    color: colors.textOnLight,
-    background: colors.white,
-    border: `1px solid ${colors.borderLight}`,
-    borderRadius: radius.md,
-    outline: 'none',
-    boxSizing: 'border-box',
-    resize: 'vertical',
-    fontFamily: 'inherit',
-    lineHeight: 1.6,
-  },
-  checkRow: {
-    marginBottom: spacing[5],
-  },
-  checkLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: spacing[2],
-    fontSize: typography.fontSize.sm,
-    color: colors.textOnLight,
-    cursor: 'pointer',
-  },
-  checkbox: {
-    width: '16px',
-    height: '16px',
-    cursor: 'pointer',
-  },
-  modalActions: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: spacing[2],
-  },
-  cancelBtn: {
-    padding: `${spacing[2]} ${spacing[4]}`,
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
-    color: colors.textOnLight,
-    background: colors.white,
-    border: `1px solid ${colors.borderLight}`,
-    borderRadius: radius.md,
-    cursor: 'pointer',
-  },
-  saveBtn: {
-    padding: `${spacing[2]} ${spacing[5]}`,
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
-    color: colors.white,
-    background: '#111827',
-    border: '1px solid #111827',
-    borderRadius: radius.md,
-    cursor: 'pointer',
   },
 };

@@ -34,6 +34,12 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  * Phase 7 WebSocket (5/12) changes:
  *  - /ws/** permitAll for STOMP handshake. In production (Phase 8) a STOMP
  *    ChannelInterceptor should validate JWT on CONNECT frames instead.
+ *
+ * 7-B (사용자 공지 연동) changes:
+ *  - /api/notices/** permitAll. Public notice list/detail + the
+ *    POST /{id}/view counter endpoint are all open to anonymous visitors.
+ *    Distinct path from /api/admin/notices (admin CRUD), so no overlap with
+ *    the /api/admin/** hasRole("ADMIN") guard below.
  */
 @Configuration
 @EnableWebSecurity
@@ -71,6 +77,14 @@ public class SecurityConfig {
                         // General product/category browsing - public
                         .requestMatchers("/api/products", "/api/products/**").permitAll()
                         .requestMatchers("/api/categories", "/api/categories/**").permitAll()
+
+                        // [Phase 7-B] Public notices - list / detail / view-counter
+                        // all open to anonymous visitors (POST /{id}/view included).
+                        .requestMatchers("/api/notices", "/api/notices/**").permitAll()
+
+                        // [Phase 7-B] 업로드된 공지 첨부 이미지 - 정적 서빙, 공개.
+                        .requestMatchers("/uploads/**").permitAll()
+
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/internal/**").permitAll()
 

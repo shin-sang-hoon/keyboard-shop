@@ -3,23 +3,30 @@ package backend.dto;
 import backend.entity.Notice;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
- * 관리자 공지 관리 DTO (Phase 7-G 라운드 7).
+ * 관리자 공지 관리 DTO (Phase 7-G 라운드 7 + 7-B 첨부 연동).
  *
  * 중첩 구조:
- *   - AdminNoticeDto.ListItem  : 목록 1행 (본문 제외 — 페이로드 절감)
- *   - AdminNoticeDto.Detail    : 상세/수정 모달용 (본문 포함)
- *   - AdminNoticeDto.SaveRequest : 등록·수정 공용 요청 body
+ *   - AdminNoticeDto.ListItem : 목록 1행 (본문·첨부 제외 — 페이로드 절감)
+ *   - AdminNoticeDto.Detail   : 상세/수정 모달용 (본문 + 첨부 포함)
  *
- * 목록은 본문(content)을 빼서 가볍게, 상세 조회 시에만 본문을 내린다
- * (AuditLog 뷰어의 ListItem/Detail 분리와 동일 패턴).
+ * 7-B 변경:
+ *   - Detail 에 attachments 추가 (수정 모달이 기존 첨부를 보여주고
+ *     일부를 삭제 지정할 수 있도록).
+ *   - SaveRequest(JSON record) 제거 — 작성/수정이 첨부 업로드를 포함하는
+ *     multipart/form-data 로 전환되어 Controller 에서 @RequestParam 으로
+ *     개별 필드를 받는다.
+ *
+ * 첨부 표현(Attachment)은 공개 DTO 와 동일하므로 NoticeDto.Attachment 를
+ * 공유한다 (중복 정의 회피).
  */
 public final class AdminNoticeDto {
 
     private AdminNoticeDto() {}
 
-    /** 목록 1행 — 본문 제외. */
+    /** 목록 1행 — 본문·첨부 제외. */
     public record ListItem(
             Long id,
             String title,
@@ -40,7 +47,7 @@ public final class AdminNoticeDto {
         }
     }
 
-    /** 상세 — 본문 포함 (수정 모달 진입 시 사용). */
+    /** 상세 — 본문 + 첨부 포함 (수정 모달 진입 / 작성·수정 응답). */
     public record Detail(
             Long id,
             String title,
@@ -48,7 +55,8 @@ public final class AdminNoticeDto {
             boolean pinned,
             int viewCount,
             LocalDateTime createdAt,
-            LocalDateTime updatedAt
+            LocalDateTime updatedAt,
+            List<NoticeDto.Attachment> attachments
     ) {
         public static Detail from(Notice n) {
             return new Detail(
@@ -58,20 +66,11 @@ public final class AdminNoticeDto {
                     n.isPinned(),
                     n.getViewCount(),
                     n.getCreatedAt(),
-                    n.getUpdatedAt()
+                    n.getUpdatedAt(),
+                    n.getAttachments().stream()
+                            .map(NoticeDto.Attachment::from)
+                            .toList()
             );
         }
-    }
-
-    /**
-     * 등록·수정 공용 요청 body.
-     * POST /api/admin/notices            { title, content, pinned }
-     * PUT  /api/admin/notices/{id}       { title, content, pinned }
-     */
-    public record SaveRequest(
-            String title,
-            String content,
-            Boolean pinned      // null 허용 → Service 에서 false 로 기본값 처리
-    ) {
     }
 }

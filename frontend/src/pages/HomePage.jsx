@@ -12,9 +12,11 @@
 // 그 외 모든 섹션은 3-S 그대로 유지.
 
 import { useEffect, useState, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { colors, typography, spacing, radius } from '../styles/tokens';
-import { ALL_NOTICES } from '../data/notices';
+import { listNotices } from '../api/notices';
+import { useAuth } from '../hooks/useAuth';
+import NoticeFormModal from '../components/NoticeFormModal';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
 
@@ -252,18 +254,75 @@ const NOTICE_HOVER_CSS = `
 .sw-write-btn:hover { background: ${colors.textOnLight}; color: ${colors.white}; }
 `;
 
+// 작성일 ISO → YYYY-MM-DD (목록 표시용). null 안전.
+function formatNoticeDate(iso) {
+  return (iso || '').slice(0, 10);
+}
+
+// 최근 7일 이내 작성 공지에 'N' 배지 — 더미의 isNew 를 작성일 기준으로 대체.
+function isRecentNotice(iso) {
+  if (!iso) return false;
+  const diffDays = (Date.now() - new Date(iso).getTime()) / 86400000;
+  return diffDays >= 0 && diffDays < 7;
+}
+
 function NoticeBoard() {
-  const [page, setPage] = useState(0);
+  const { user } = useAuth();
   const navigate = useNavigate();
-  const totalPages = Math.ceil(ALL_NOTICES.length / NOTICES_PER_PAGE);
-  const start = page * NOTICES_PER_PAGE;
-  const currentNotices = ALL_NOTICES.slice(start, start + NOTICES_PER_PAGE);
+  const [page, setPage] = useState(0);
+  const [notices, setNotices] = useState([]);
+  const [totalPages, setTotalPages] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);   // 작성 직후 목록 새로고침 트리거
+  const [writeOpen, setWriteOpen] = useState(false);
+
+  const isAdmin = user?.role === 'ADMIN';
+
+  // 공지 목록 — 더미 ALL_NOTICES.slice() → GET /api/notices?page&size 서버 페이징.
+  // page 또는 reloadKey(작성 직후)가 바뀌면 재조회.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    listNotices(page, NOTICES_PER_PAGE)
+      .then((data) => {
+        if (cancelled) return;
+        setNotices(data.content || []);
+        setTotalPages(data.totalPages || 0);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('[NoticeBoard] 공지 목록 로드 실패:', err);
+        setNotices([]);
+        setTotalPages(0);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [page, reloadKey]);
 
   const goPage = (p) => setPage(Math.max(0, Math.min(totalPages - 1, p)));
-  const handleWrite = () => alert('작성 권한이 없습니다.');
+
+  // 글쓰기 — ADMIN 이면 작성 모달, 그 외엔 안내.
+  const handleWrite = () => {
+    if (isAdmin) {
+      setWriteOpen(true);
+    } else {
+      alert('관리자만 작성할 수 있습니다.');
+    }
+  };
+
+  // 작성 완료 — 모달 닫고 1페이지로 이동 + 목록 재조회.
+  const handleSaved = () => {
+    setWriteOpen(false);
+    setPage(0);
+    setReloadKey((k) => k + 1);
+  };
 
   return (
-    <section style={noticeStyles.section}>
+    <section id="notice-board" style={noticeStyles.section}>
       <style>{NOTICE_HOVER_CSS}</style>
 
       <h2 style={noticeStyles.title}>공지사항</h2>
@@ -278,26 +337,45 @@ function NoticeBoard() {
           </tr>
         </thead>
         <tbody>
-          {currentNotices.map((n) => (
-            <tr
-              key={n.id}
-              className="sw-notice-row"
-              style={noticeStyles.row}
-              onClick={() => navigate(`/notices/${n.id}`)}
-            >
-              <td style={{ ...noticeStyles.td, color: colors.textOnLightDim }}>{n.id}</td>
-              <td style={noticeStyles.td}>
-                <span className="sw-notice-title">{n.title}</span>
-                {n.isNew && <span style={noticeStyles.newBadge}>N</span>}
-              </td>
-              <td style={{ ...noticeStyles.td, textAlign: 'right', color: colors.textOnLightDim }}>
-                {n.date}
-              </td>
-              <td style={{ ...noticeStyles.td, textAlign: 'right', color: colors.textOnLightDim }}>
-                {(n.viewCount ?? 0).toLocaleString()}
-              </td>
+          {loading && notices.length === 0 ? (
+            <tr>
+              <td colSpan={4} style={noticeStyles.messageCell}>공지사항을 불러오는 중...</td>
             </tr>
-          ))}
+          ) : notices.length === 0 ? (
+            <tr>
+              <td colSpan={4} style={noticeStyles.messageCell}>등록된 공지사항이 없습니다.</td>
+            </tr>
+          ) : (
+            notices.map((n) => (
+              <tr
+                key={n.id}
+                className="sw-notice-row"
+                style={noticeStyles.row}
+                onClick={() => navigate(`/notices/${n.id}`)}
+              >
+                {/* 고정 공지는 No 자리에 '공지' 라벨 (서버가 pinned 먼저 정렬) */}
+                <td
+                  style={{
+                    ...noticeStyles.td,
+                    color: n.pinned ? colors.textOnLight : colors.textOnLightDim,
+                    ...(n.pinned ? { fontWeight: typography.fontWeight.bold } : {}),
+                  }}
+                >
+                  {n.pinned ? '공지' : n.id}
+                </td>
+                <td style={noticeStyles.td}>
+                  <span className="sw-notice-title">{n.title}</span>
+                  {isRecentNotice(n.createdAt) && <span style={noticeStyles.newBadge}>N</span>}
+                </td>
+                <td style={{ ...noticeStyles.td, textAlign: 'right', color: colors.textOnLightDim }}>
+                  {formatNoticeDate(n.createdAt)}
+                </td>
+                <td style={{ ...noticeStyles.td, textAlign: 'right', color: colors.textOnLightDim }}>
+                  {(n.viewCount ?? 0).toLocaleString()}
+                </td>
+              </tr>
+            ))
+          )}
         </tbody>
       </table>
 
@@ -313,49 +391,76 @@ function NoticeBoard() {
         </button>
       </div>
 
-      {/* 페이지네이션 */}
-      <div style={noticeStyles.pagination}>
-        <button
-          onClick={() => goPage(page - 1)}
-          disabled={page === 0}
-          aria-label="이전 페이지"
-          style={{
-            ...noticeStyles.pageNav,
-            opacity: page === 0 ? 0.25 : 1,
-            cursor: page === 0 ? 'default' : 'pointer',
-          }}
-        >‹</button>
-
-        {Array.from({ length: totalPages }, (_, i) => (
+      {/* 페이지네이션 — 서버 totalPages 기준. 2페이지 이상일 때만 노출 */}
+      {totalPages > 1 && (
+        <div style={noticeStyles.pagination}>
           <button
-            key={i}
-            onClick={() => goPage(i)}
+            onClick={() => goPage(page - 1)}
+            disabled={page === 0}
+            aria-label="이전 페이지"
             style={{
-              ...noticeStyles.pageNum,
-              fontWeight: page === i ? typography.fontWeight.bold : typography.fontWeight.medium,
-              color: page === i ? colors.textOnLight : colors.textOnLightDim,
-              borderBottom: page === i ? `2px solid ${colors.textOnLight}` : '2px solid transparent',
+              ...noticeStyles.pageNav,
+              opacity: page === 0 ? 0.25 : 1,
+              cursor: page === 0 ? 'default' : 'pointer',
             }}
-          >{i + 1}</button>
-        ))}
+          >‹</button>
 
-        <button
-          onClick={() => goPage(page + 1)}
-          disabled={page === totalPages - 1}
-          aria-label="다음 페이지"
-          style={{
-            ...noticeStyles.pageNav,
-            opacity: page === totalPages - 1 ? 0.25 : 1,
-            cursor: page === totalPages - 1 ? 'default' : 'pointer',
-          }}
-        >›</button>
-      </div>
+          {Array.from({ length: totalPages }, (_, i) => (
+            <button
+              key={i}
+              onClick={() => goPage(i)}
+              style={{
+                ...noticeStyles.pageNum,
+                fontWeight: page === i ? typography.fontWeight.bold : typography.fontWeight.medium,
+                color: page === i ? colors.textOnLight : colors.textOnLightDim,
+                borderBottom: page === i ? `2px solid ${colors.textOnLight}` : '2px solid transparent',
+              }}
+            >{i + 1}</button>
+          ))}
+
+          <button
+            onClick={() => goPage(page + 1)}
+            disabled={page === totalPages - 1}
+            aria-label="다음 페이지"
+            style={{
+              ...noticeStyles.pageNav,
+              opacity: page === totalPages - 1 ? 0.25 : 1,
+              cursor: page === totalPages - 1 ? 'default' : 'pointer',
+            }}
+          >›</button>
+        </div>
+      )}
+
+      {/* ADMIN 작성 모달 */}
+      {writeOpen && (
+        <NoticeFormModal
+          mode="create"
+          onClose={() => setWriteOpen(false)}
+          onSaved={handleSaved}
+        />
+      )}
     </section>
   );
 }
 
 // ─── MAIN ────────────────────────────────────────────────────────────────────
 export default function HomePage() {
+  const location = useLocation();
+
+  // 공지 상세의 "목록" 버튼 → 메인 진입 시 공지 섹션으로 스크롤.
+  // 상단 ProductSection 들이 비동기 로딩되며 레이아웃이 변하므로,
+  // 약간 지연 후 스크롤해 위치 어긋남을 줄인다.
+  useEffect(() => {
+    if (location.state?.scrollTo === 'notices') {
+      const t = setTimeout(() => {
+        document
+          .getElementById('notice-board')
+          ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 300);
+      return () => clearTimeout(t);
+    }
+  }, [location.state]);
+
   return (
     <div style={{ background: colors.white, fontFamily: typography.fontFamily.base }}>
       <Hero />
@@ -493,6 +598,12 @@ const cardStyles = {
 
 const noticeStyles = {
   section: { marginTop: spacing[20], marginBottom: spacing[8] },
+  messageCell: {
+    padding: `${spacing[10]} ${spacing[4]}`,
+    textAlign: 'center',
+    color: colors.textOnLightDim,
+    fontSize: typography.fontSize.sm,
+  },
   title: {
     fontSize: typography.fontSize.xl,
     fontWeight: typography.fontWeight.bold,
