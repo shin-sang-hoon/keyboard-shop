@@ -27,6 +27,7 @@ import AdminFlashDealPage from './pages/admin/AdminFlashDealPage';
 import AdminLayout from './components/admin/AdminLayout';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import AdminUserPage from './pages/admin/AdminUserPage';
+import AdminProductPage from './pages/admin/AdminProductPage';
 import AuctionListPage from './pages/AuctionListPage';
 import AuctionDetailPage from './pages/AuctionDetailPage';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -118,6 +119,7 @@ function App() {
           <Route index element={<AdminDashboardPage />} />
           <Route path="dashboard" element={<AdminDashboardPage />} />
           <Route path="users" element={<AdminUserPage />} />
+          <Route path="products" element={<AdminProductPage />} />
           <Route path="flash-deals" element={<AdminFlashDealPage />} />
           <Route path="audit-logs" element={<AdminAuditLogPage />} />
         </Route>

@@ -82,6 +82,27 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      */
     long countByStatus(ProductStatus status);
 
+    // ─── 7-G 라운드 5 (5/25): 관리자 상품 관리 ──────────────────────────
+    /**
+     * 관리자 상품 목록 — status / productType / search 3개 모두 선택(NULL 허용).
+     *
+     * 공개 API 의 findActiveWithFilters 와 구분되는 점:
+     *   - status 도 NULL 허용 → ACTIVE/INACTIVE 전체 조회 가능 (관리자는 숨긴 상품도 봐야 함).
+     *   - GLB 우선 CASE 정렬 제거 → 관리자 목록은 Pageable 의 sort(기본 id) 를 그대로 따름.
+     *   findActiveWithFilters 를 건드리지 않고 별도 메서드로 분리 — 공개 API 의
+     *   "항상 ACTIVE 만 노출" 불변식(면접 자산)을 깨지 않기 위함.
+     */
+    @EntityGraph(attributePaths = {"brand", "category"})
+    @Query("SELECT p FROM Product p WHERE " +
+           "(:status IS NULL OR p.status = :status) " +
+           "AND (:search IS NULL OR :search = '' OR LOWER(p.name) LIKE LOWER(CONCAT('%', :search, '%'))) " +
+           "AND (:productType IS NULL OR p.productType = :productType)")
+    Page<Product> findForAdmin(
+            @Param("search") String search,
+            @Param("productType") ProductType productType,
+            @Param("status") ProductStatus status,
+            Pageable pageable);
+
     // ─── Flash Deal 임계값 (5/17) ──────────────────────────────────
     /**
      * KEYBOARD ACTIVE 총 개수.
