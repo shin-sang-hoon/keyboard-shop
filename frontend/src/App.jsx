@@ -29,6 +29,7 @@ import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import AdminUserPage from './pages/admin/AdminUserPage';
 import AdminProductPage from './pages/admin/AdminProductPage';
 import AdminOrderPage from './pages/admin/AdminOrderPage';
+import AdminNoticePage from './pages/admin/AdminNoticePage';
 import AuctionListPage from './pages/AuctionListPage';
 import AuctionDetailPage from './pages/AuctionDetailPage';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -122,6 +123,7 @@ function App() {
           <Route path="users" element={<AdminUserPage />} />
           <Route path="products" element={<AdminProductPage />} />
           <Route path="orders" element={<AdminOrderPage />} />
+          <Route path="notices" element={<AdminNoticePage />} />
           <Route path="flash-deals" element={<AdminFlashDealPage />} />
           <Route path="audit-logs" element={<AdminAuditLogPage />} />
         </Route>
