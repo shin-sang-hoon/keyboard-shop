@@ -82,6 +82,20 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      */
     long countByStatus(ProductStatus status);
 
+    // ─── 7-G R9 (5/26): 카테고리/브랜드 삭제 가드 ───────────────────────
+    /**
+     * 특정 카테고리에 속한 상품 수.
+     * AdminCategoryService.deleteCategory 가 호출 — 사용 중이면 삭제 거부(409).
+     * Product.category(ManyToOne) 연관 → 파생 쿼리로 category_id 매핑.
+     */
+    long countByCategoryId(Long categoryId);
+
+    /**
+     * 특정 브랜드에 속한 상품 수.
+     * AdminBrandService.deleteBrand 가 호출 — 사용 중이면 삭제 거부(409).
+     */
+    long countByBrandId(Long brandId);
+
     // ─── 7-G 라운드 5 (5/25): 관리자 상품 관리 ──────────────────────────
     /**
      * 관리자 상품 목록 — status / productType / search 3개 모두 선택(NULL 허용).

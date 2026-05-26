@@ -31,6 +31,7 @@ import AdminProductPage from './pages/admin/AdminProductPage';
 import AdminOrderPage from './pages/admin/AdminOrderPage';
 import AdminNoticePage from './pages/admin/AdminNoticePage';
 import AdminReviewQnaPage from './pages/admin/AdminReviewQnaPage';
+import AdminCategoryBrandPage from './pages/admin/AdminCategoryBrandPage';
 import AuctionListPage from './pages/AuctionListPage';
 import AuctionDetailPage from './pages/AuctionDetailPage';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -126,6 +127,7 @@ function App() {
           <Route path="orders" element={<AdminOrderPage />} />
           <Route path="notices" element={<AdminNoticePage />} />
           <Route path="reviews" element={<AdminReviewQnaPage />} />
+          <Route path="catalog" element={<AdminCategoryBrandPage />} />
           <Route path="flash-deals" element={<AdminFlashDealPage />} />
           <Route path="audit-logs" element={<AdminAuditLogPage />} />
         </Route>
