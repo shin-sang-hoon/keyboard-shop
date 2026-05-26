@@ -11,64 +11,98 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Review 영속성 레포지토리 (5-H A2 + A6 통합 + B1 batch + B5 stats).
+ * Review 영속성 레포지토리 (5-H A2 + A6 + B1 batch + B5 stats, 7-G R8 hidden 필터).
  *
- * 메서드 구성 (8개):
- *  - 조회: findByProductId(페이징), findByUserId(마이페이지)
- *  - 집계: countByProductId, findAverageRatingByProductId
- *  - 구매 인증: existsByOrderItemId(작성 전 사전 체크), findByOrderItemId(주문별 리뷰 조회)
- *  - B1 batch: findReviewStatsByProductIds (목록 페이지 N+1 회피용 IN 절 일괄 집계)
- *  - B5 stats: findRatingDistributionByProductId (별점 분포 5버킷 GROUP BY FLOOR)
+ * 메서드 구성:
+ *  - 공개 조회: findByProductId(페이징), findByUserId(마이페이지)
+ *  - 공개 집계: countByProductId, findAverageRatingByProductId
+ *  - 구매 인증: existsByOrderItemId, findByOrderItemId
+ *  - B1 batch: findReviewStatsByProductIds
+ *  - B5 stats: findRatingDistributionByProductId
+ *  - 7-G R8: findForAdmin(관리자 목록), countByHiddenTrue(숨김 카운트)
  *
- * UNIQUE(order_item_id) 위반은 DB 가 막지만, Service 에서 existsByOrderItemId 로 사전 검증해
- * 깔끔한 비즈니스 예외(ReviewAlreadyExistsException 등)로 변환하는 게 UX 상 좋음.
+ * ── 7-G R8 hidden 정책 ──────────────────────────────────────────────
+ *  관리자가 숨긴 리뷰(hidden=true)는 "공개"로 노출되는 모든 경로에서 제외돼야 함.
+ *  그렇지 않으면 숨긴 리뷰가 별점 평균/개수에 계속 반영되는 버그가 됨.
+ *
+ *  → 공개 조회/집계 5개 메서드(findByProductId, countByProductId,
+ *    findAverageRatingByProductId, findReviewStatsByProductIds,
+ *    findRatingDistributionByProductId)를 @Query 로 전환하고 hidden=false 를 추가.
+ *
+ *  메서드 "시그니처"는 그대로 유지 → ReviewService / ProductService 호출부 무수정.
+ *  (파생 메서드명을 바꾸지 않고 @Query 만 얹어 동작을 교체하는 방식)
+ *
+ *  예외:
+ *   - findByUserId : 마이페이지 — 작성자 본인은 숨김 리뷰도 볼 수 있어야 하므로 필터 안 함
+ *   - existsByOrderItemId / findByOrderItemId : 구매 인증용 — 숨김이어도 "리뷰 존재"는 사실,
+ *     중복 작성 방지를 위해 필터 안 함
  */
 public interface ReviewRepository extends JpaRepository<Review, Long> {
 
-    /** 상품 페이지 — 정렬은 Pageable 에서 (createdAt DESC = 최신순, rating DESC = 별점순) */
-    Page<Review> findByProductId(Long productId, Pageable pageable);
+    /**
+     * 상품 페이지 — 공개 리뷰만 (hidden=false). 정렬은 Pageable 위임.
+     * 파생 메서드명을 유지하되 @Query 로 hidden 필터를 적용 (호출부 무수정).
+     */
+    @Query(value = "SELECT r FROM Review r " +
+                   "WHERE r.product.id = :productId AND r.hidden = false",
+           countQuery = "SELECT COUNT(r) FROM Review r " +
+                   "WHERE r.product.id = :productId AND r.hidden = false")
+    Page<Review> findByProductId(@Param("productId") Long productId, Pageable pageable);
 
-    /** 마이페이지 — 사용자가 작성한 모든 리뷰 (재구매로 동일 상품 여러 row 가능) */
+    /** 마이페이지 — 사용자 본인 리뷰 전체 (숨김 포함 — 본인은 볼 수 있어야 함) */
     List<Review> findByUserId(Long userId);
 
-    /** 상품 카드 표시용 카운트 */
-    long countByProductId(Long productId);
+    /** 상품 카드 표시용 카운트 — 공개 리뷰만 */
+    @Query("SELECT COUNT(r) FROM Review r " +
+           "WHERE r.product.id = :productId AND r.hidden = false")
+    long countByProductId(@Param("productId") Long productId);
 
-    /** 평균 별점 — 리뷰 0건이면 null. Service 에서 0.0 변환 또는 null 그대로 응답 */
-    @Query("SELECT AVG(r.rating) FROM Review r WHERE r.product.id = :productId")
-    Double findAverageRatingByProductId(Long productId);
+    /** 평균 별점 — 공개 리뷰만. 리뷰 0건이면 null */
+    @Query("SELECT AVG(r.rating) FROM Review r " +
+           "WHERE r.product.id = :productId AND r.hidden = false")
+    Double findAverageRatingByProductId(@Param("productId") Long productId);
 
-    /** 구매 인증 — 이 OrderItem 에 이미 리뷰 작성됐는지. UNIQUE 사전 체크 */
+    /** 구매 인증 — 이 OrderItem 에 이미 리뷰 작성됐는지 (숨김 포함 — 중복 작성 방지) */
     boolean existsByOrderItemId(Long orderItemId);
 
-    /** 마이페이지의 "이 주문의 리뷰" 표시용 — 1 OrderItem 당 최대 1 Review */
+    /** 마이페이지의 "이 주문의 리뷰" 표시용 — 1 OrderItem 당 최대 1 Review (숨김 포함) */
     Optional<Review> findByOrderItemId(Long orderItemId);
 
     /**
-     * 5-H B1: 목록 일괄 집계 — IN 절 1쿼리.
+     * 5-H B1: 목록 일괄 집계 — IN 절 1쿼리 (공개 리뷰만).
      * @return Object[]: [productId(Long), count(Long), avgRating(Double)]
-     *         리뷰 0건 product 는 row 없음 (Service 에서 Map.getOrDefault 처리)
      */
     @Query("SELECT r.product.id, COUNT(r), AVG(r.rating) " +
-           "FROM Review r WHERE r.product.id IN :productIds " +
+           "FROM Review r WHERE r.product.id IN :productIds AND r.hidden = false " +
            "GROUP BY r.product.id")
     List<Object[]> findReviewStatsByProductIds(@Param("productIds") List<Long> productIds);
 
     /**
-     * 5-H B5: 별점 분포 — FLOOR(rating) 으로 5버킷 정규화 후 GROUP BY.
-     *
-     * 0.5 단위 rating 을 정수 버킷으로 매핑 (한국 쇼핑몰 표준):
-     *   FLOOR(1.0) = 1, FLOOR(1.5) = 1
-     *   FLOOR(2.0) = 2, FLOOR(2.5) = 2
-     *   FLOOR(3.0) = 3, FLOOR(3.5) = 3
-     *   FLOOR(4.0) = 4, FLOOR(4.5) = 4
-     *   FLOOR(5.0) = 5
-     *
+     * 5-H B5: 별점 분포 — FLOOR(rating) 5버킷 GROUP BY (공개 리뷰만).
      * @return Object[]: [bucket(Integer 1~5), count(Long)]
-     *         리뷰 0건 버킷은 row 없음 (Service 에서 1~5 키 보정)
      */
     @Query("SELECT FLOOR(r.rating), COUNT(r) " +
-           "FROM Review r WHERE r.product.id = :productId " +
+           "FROM Review r WHERE r.product.id = :productId AND r.hidden = false " +
            "GROUP BY FLOOR(r.rating)")
     List<Object[]> findRatingDistributionByProductId(@Param("productId") Long productId);
+
+    // ─────────────────────────────────────────────────────
+    // 7-G R8: 관리자 운영 — 숨김 리뷰 포함 전체 조회
+    // ─────────────────────────────────────────────────────
+
+    /**
+     * 관리자 리뷰 목록 — hidden 필터 선택적 (null = 전체).
+     *
+     * user/product 를 JOIN FETCH — DTO 변환 시 N+1 회피.
+     * (둘 다 ManyToOne 단일 연관 → 페이징 + fetch join 동시 사용 안전, 메모리 페이징 경고 없음)
+     */
+    @Query(value = "SELECT r FROM Review r " +
+                   "JOIN FETCH r.user JOIN FETCH r.product " +
+                   "WHERE (:hidden IS NULL OR r.hidden = :hidden)",
+           countQuery = "SELECT COUNT(r) FROM Review r " +
+                   "WHERE (:hidden IS NULL OR r.hidden = :hidden)")
+    Page<Review> findForAdmin(@Param("hidden") Boolean hidden, Pageable pageable);
+
+    /** 관리자 헤더 통계용 — 현재 숨김 처리된 리뷰 수 */
+    long countByHiddenTrue();
 }

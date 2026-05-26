@@ -93,6 +93,17 @@ const PANELS = [
     links: [{ to: '/admin/notices', label: '공지 관리' }],
   },
   {
+    id: 'review',
+    title: '리뷰·문의',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+           strokeLinecap="round" strokeLinejoin="round" width="20" height="20">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      </svg>
+    ),
+    links: [{ to: '/admin/reviews', label: '리뷰·Q&A 운영' }],
+  },
+  {
     id: 'flashdeal',
     title: '플래시 딜',
     icon: (
