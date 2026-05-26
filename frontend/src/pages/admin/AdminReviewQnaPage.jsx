@@ -19,7 +19,7 @@ const PAGE_SIZE = 20;
 
 const TABS = [
   { id: 'reviews', label: '리뷰' },
-  { id: 'reports', label: '신고 큐' },
+  { id: 'reports', label: '신고' },
   { id: 'qna', label: 'Q&A' },
 ];
 
