@@ -6,6 +6,7 @@ import ProductTabs from '../components/ProductTabs';
 import QnAFormModal from '../components/QnAFormModal';
 import ReviewFormModal from '../components/ReviewFormModal';
 import { useCartStore } from '../stores/cartStore';
+import { useAuthStore } from '../stores/authStore';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
 
@@ -51,7 +52,7 @@ const LAYOUT_LABELS = {
 
 // ─── 인증 헬퍼 ──────────────────────────────────
 function getAuthToken() {
-  return localStorage.getItem('accessToken');
+  return useAuthStore.getState().accessToken;
 }
 
 function isLoggedIn() {

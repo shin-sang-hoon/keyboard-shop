@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useAuthStore } from '../stores/authStore';
 
 /**
  * QnAFormModal — Q&A 작성 모달 (5-H C3)
@@ -87,7 +88,7 @@ export default function QnAFormModal({ productId, onClose, onSuccess }) {
     setError(null);
 
     try {
-      const token = localStorage.getItem('accessToken');
+      const token = useAuthStore.getState().accessToken;
       if (!token) {
         setError('로그인이 필요합니다.');
         setBusy(false);

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useAuthStore } from '../stores/authStore';
 
 /**
  * QnAList — 상품 Q&A 리스트 (5-H C3)
@@ -48,7 +49,7 @@ export default function QnAList({ productId, onRequestWrite, refetchKey = 0 }) {
     setError(null);
 
     try {
-      const token = localStorage.getItem('accessToken');
+      const token = useAuthStore.getState().accessToken;
       const headers = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 

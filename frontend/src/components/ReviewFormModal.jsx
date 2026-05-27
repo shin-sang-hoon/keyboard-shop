@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import RatingInput from './RatingInput';
+import { useAuthStore } from '../stores/authStore';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
 
@@ -92,7 +93,7 @@ export default function ReviewFormModal({ productId, onClose, onSuccess }) {
     setError(null);
 
     try {
-      const token = localStorage.getItem('accessToken');
+      const token = useAuthStore.getState().accessToken;
       if (!token) {
         setError('로그인이 필요합니다.');
         setBusy(false);
