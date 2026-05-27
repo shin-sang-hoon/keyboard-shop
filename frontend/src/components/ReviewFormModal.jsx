@@ -5,34 +5,77 @@ import { useAuthStore } from '../stores/authStore';
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
 
 /**
- * ReviewFormModal — 리뷰 작성 모달 (5-H C2).
+ * ReviewFormModal — 리뷰 작성 모달 (UX P0, 5/28 검색식 → 자동 매칭 전환).
  *
- * B2 백엔드: POST /api/reviews
- *   요청: { orderItemId, rating, content }
- *   인증 필요. 구매 인증 검증 4단계:
- *     1) orderItem 존재 / 본인 소유
- *     2) order status = DELIVERED
- *     3) 1 OrderItem = max 1 Review (UNIQUE)
- *     4) rating 1.0~5.0 + 0.5 단위
+ * 변경 배경:
+ *   기존: 사용자가 "주문 상품 ID" 숫자를 직접 입력 → 외워서 적어야 하는 UX 마찰.
+ *   변경: 모달 진입 시 GET /api/orders/my/reviewable-items?productId=X 자동 호출 →
+ *         후보 OrderItem 카드로 표시 → 자동 선택 또는 라디오 선택.
  *
- * 면접 자산 (C3 패턴 그대로 + RatingInput):
- *   - role="dialog" + aria-modal + aria-labelledby
- *   - ESC + Tab focus trap + 배경 클릭 닫기 + body 스크롤 잠금
- *   - busy 가드 (이중 제출 방지)
- *   - RatingInput 별도 컴포넌트로 분리 (재사용 가능)
- *   - orderItemId 입력은 임시 — 5-D 마이페이지 주문내역 → 리뷰작성 진입 시
- *     자동으로 채워질 자리 (지금은 수동 입력으로 풀 플로우 검증 가능)
+ * 백엔드 검증 (5-H A6 구매 인증 4단계):
+ *   1) orderItem 존재 / 본인 소유
+ *   2) order status = DELIVERED
+ *   3) 1 OrderItem = max 1 Review (UNIQUE)
+ *   4) rating 1.0~5.0 + 0.5 단위
+ *   → 서버측 가드는 그대로. 프론트는 "후보 미리 보여주기" 만 추가 (defense in depth).
+ *
+ * 상태 머신:
+ *   loading=true                        → 스피너
+ *   loading=false, candidates.length=0  → "구매 이력 없음" 안내 + 등록 disabled
+ *   loading=false, candidates.length=1  → 자동 선택, 카드 1개 표시
+ *   loading=false, candidates.length>1  → 라디오 카드 선택 (재구매)
  */
 export default function ReviewFormModal({ productId, onClose, onSuccess }) {
-  const [orderItemId, setOrderItemId] = useState('');
+  const [candidates, setCandidates] = useState([]);
+  const [selectedOrderItemId, setSelectedOrderItemId] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+
   const [rating, setRating] = useState(0);
   const [content, setContent] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
   const dialogRef = useRef(null);
+  const fetchedRef = useRef(false);  // StrictMode 이중 호출 가드 (자산 #21 패턴 재사용)
 
-  // ESC + 단순 focus trap + body 스크롤 잠금
+  // ────── reviewable 후보 fetch ──────
+  useEffect(() => {
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
+
+    const fetchCandidates = async () => {
+      try {
+        const token = useAuthStore.getState().accessToken;
+        if (!token) {
+          setLoadError('로그인이 필요합니다.');
+          setLoading(false);
+          return;
+        }
+        const res = await fetch(
+          `${API_BASE}/orders/my/reviewable-items?productId=${productId}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!res.ok) {
+          throw new Error(`후보 조회 실패 (${res.status})`);
+        }
+        const data = await res.json();
+        setCandidates(data);
+        // 1개면 자동 선택
+        if (data.length === 1) {
+          setSelectedOrderItemId(data[0].orderItemId);
+        }
+        setLoading(false);
+      } catch (err) {
+        console.error('[ReviewFormModal] fetch candidates error:', err);
+        setLoadError(err.message || '후보 조회 중 오류가 발생했습니다.');
+        setLoading(false);
+      }
+    };
+    fetchCandidates();
+  }, [productId]);
+
+  // ────── ESC + Tab focus trap + body 스크롤 잠금 ──────
   useEffect(() => {
     const handleKey = (e) => {
       if (e.key === 'Escape') {
@@ -74,9 +117,8 @@ export default function ReviewFormModal({ productId, onClose, onSuccess }) {
     if (busy) return;
 
     // 검증
-    const orderItemIdNum = Number(orderItemId);
-    if (!orderItemIdNum || orderItemIdNum <= 0) {
-      setError('주문 상품 ID 를 입력해주세요. (마이페이지 주문내역에서 확인)');
+    if (!selectedOrderItemId) {
+      setError('리뷰를 작성할 주문을 선택해주세요.');
       return;
     }
     if (rating < 1 || rating > 5) {
@@ -104,10 +146,10 @@ export default function ReviewFormModal({ productId, onClose, onSuccess }) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          orderItemId: orderItemIdNum,
+          orderItemId: selectedOrderItemId,
           rating,
           content: trimmedContent || null,
         }),
@@ -137,6 +179,16 @@ export default function ReviewFormModal({ productId, onClose, onSuccess }) {
     }
   };
 
+  // ────── 날짜·가격 포맷 ──────
+  const formatDate = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const formatPrice = (n) => `₩${Number(n).toLocaleString('ko-KR')}`;
+
+  const canSubmit = !loading && !loadError && candidates.length > 0 && selectedOrderItemId && rating >= 1;
+
   return (
     <div style={S.backdrop} onClick={handleBackdropClick}>
       <div
@@ -148,9 +200,7 @@ export default function ReviewFormModal({ productId, onClose, onSuccess }) {
       >
         {/* Header */}
         <div style={S.header}>
-          <h2 id="review-modal-title" style={S.title}>
-            리뷰 작성
-          </h2>
+          <h2 id="review-modal-title" style={S.title}>리뷰 작성</h2>
           <button
             type="button"
             onClick={() => !busy && onClose()}
@@ -170,49 +220,106 @@ export default function ReviewFormModal({ productId, onClose, onSuccess }) {
             <div>
               <p style={S.infoTitle}>구매 인증 리뷰</p>
               <p style={S.infoText}>
-                리뷰는 본인이 구매하고 배송 완료된 상품에 한해서만 작성할 수 있습니다.
-                마이페이지 → 주문내역 에서 주문 상품 ID 를 확인해주세요.
+                본인이 구매하고 배송 완료된 상품에 한해서만 작성할 수 있습니다.
+                아래에서 리뷰를 작성할 주문을 선택해주세요.
               </p>
             </div>
           </div>
 
-          {/* 주문 상품 ID */}
-          <label style={S.label}>
-            <span style={S.labelText}>
-              <span>
-                주문 상품 ID <span style={S.required}>*</span>
-              </span>
-            </span>
-            <input
-              type="number"
-              value={orderItemId}
-              onChange={(e) => setOrderItemId(e.target.value)}
-              placeholder="예: 12 (주문내역에서 확인)"
-              style={S.input}
-              disabled={busy}
-              autoFocus
-              required
-              min="1"
-            />
-          </label>
+          {/* ────── 주문 선택 영역 (loading / empty / single / multiple) ────── */}
+          <div style={S.section}>
+            <div style={S.sectionLabel}>
+              주문 선택 <span style={S.required}>*</span>
+            </div>
 
-          {/* 별점 */}
+            {loading && (
+              <div style={S.placeholderBox}>
+                <span style={S.placeholderText}>주문 내역을 불러오는 중...</span>
+              </div>
+            )}
+
+            {!loading && loadError && (
+              <div role="alert" style={S.errorBox}>⚠ {loadError}</div>
+            )}
+
+            {!loading && !loadError && candidates.length === 0 && (
+              <div style={S.emptyBox}>
+                <span style={S.emptyIcon}>📦</span>
+                <div>
+                  <p style={S.emptyTitle}>리뷰를 작성할 수 있는 주문이 없습니다</p>
+                  <p style={S.emptyText}>
+                    이 상품을 구매하지 않았거나, 배송이 완료되지 않았거나,
+                    이미 리뷰를 작성한 경우 후보에 나타나지 않습니다.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {!loading && !loadError && candidates.length > 0 && (
+              <div style={S.candidatesList} role="radiogroup" aria-label="리뷰 작성할 주문 선택">
+                {candidates.map((c) => {
+                  const selected = c.orderItemId === selectedOrderItemId;
+                  return (
+                    <button
+                      key={c.orderItemId}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => !busy && setSelectedOrderItemId(c.orderItemId)}
+                      disabled={busy}
+                      style={{
+                        ...S.candidateCard,
+                        ...(selected ? S.candidateCardSelected : {}),
+                      }}
+                    >
+                      {/* 라디오 점 */}
+                      <span style={{
+                        ...S.radioDot,
+                        ...(selected ? S.radioDotSelected : {}),
+                      }} aria-hidden="true">
+                        {selected && <span style={S.radioDotInner} />}
+                      </span>
+
+                      {/* 썸네일 */}
+                      {c.productImage ? (
+                        <img src={c.productImage} alt="" style={S.candidateImage} />
+                      ) : (
+                        <div style={S.candidateImagePlaceholder}>📦</div>
+                      )}
+
+                      {/* 정보 */}
+                      <div style={S.candidateInfo}>
+                        <div style={S.candidateName}>{c.productName}</div>
+                        <div style={S.candidateMeta}>
+                          <span>주문일 {formatDate(c.orderedAt)}</span>
+                          <span style={S.candidateMetaDot}>·</span>
+                          <span>{formatPrice(c.price)}</span>
+                          {c.quantity > 1 && (
+                            <>
+                              <span style={S.candidateMetaDot}>·</span>
+                              <span>{c.quantity}개</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* ────── 별점 ────── */}
           <label style={S.label}>
             <span style={S.labelText}>
-              <span>
-                별점 <span style={S.required}>*</span>
-              </span>
+              <span>별점 <span style={S.required}>*</span></span>
             </span>
             <div style={S.ratingWrap}>
-              <RatingInput
-                value={rating}
-                onChange={setRating}
-                size={32}
-              />
+              <RatingInput value={rating} onChange={setRating} size={32} />
             </div>
           </label>
 
-          {/* 내용 */}
+          {/* ────── 내용 ────── */}
           <label style={S.label}>
             <span style={S.labelText}>
               <span>내용</span>
@@ -230,27 +337,20 @@ export default function ReviewFormModal({ productId, onClose, onSuccess }) {
           </label>
 
           {error && (
-            <div role="alert" style={S.errorBox}>
-              ⚠ {error}
-            </div>
+            <div role="alert" style={S.errorBox}>⚠ {error}</div>
           )}
 
           <div style={S.actions}>
-            <button
-              type="button"
-              onClick={onClose}
-              style={S.cancelBtn}
-              disabled={busy}
-            >
+            <button type="button" onClick={onClose} style={S.cancelBtn} disabled={busy}>
               취소
             </button>
             <button
               type="submit"
               style={{
                 ...S.submitBtn,
-                ...(busy ? S.submitBtnBusy : {}),
+                ...(!canSubmit || busy ? S.submitBtnBusy : {}),
               }}
-              disabled={busy}
+              disabled={!canSubmit || busy}
             >
               {busy ? '등록 중…' : '리뷰 등록'}
             </button>
@@ -335,22 +435,129 @@ const S = {
     border: '1px solid #bfdbfe',
     borderRadius: 8,
   },
-  infoIcon: {
-    fontSize: 18,
+  infoIcon: { fontSize: 18, flexShrink: 0 },
+  infoTitle: { fontSize: 13, fontWeight: 700, color: '#1e40af', margin: '2px 0 4px' },
+  infoText: { fontSize: 12, color: '#1e3a8a', lineHeight: 1.55, margin: 0 },
+
+  section: { display: 'flex', flexDirection: 'column', gap: 8 },
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: '#18181b',
+  },
+
+  placeholderBox: {
+    padding: '20px 14px',
+    background: '#fafafa',
+    border: '1px dashed #e4e4e7',
+    borderRadius: 8,
+    textAlign: 'center',
+  },
+  placeholderText: { fontSize: 13, color: '#71717a' },
+
+  emptyBox: {
+    display: 'flex',
+    gap: 12,
+    padding: '14px 16px',
+    background: '#fffbeb',
+    border: '1px solid #fde68a',
+    borderRadius: 8,
+  },
+  emptyIcon: { fontSize: 22, flexShrink: 0 },
+  emptyTitle: { fontSize: 13, fontWeight: 700, color: '#92400e', margin: '2px 0 4px' },
+  emptyText: { fontSize: 12, color: '#78350f', lineHeight: 1.55, margin: 0 },
+
+  candidatesList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+    maxHeight: 240,
+    overflowY: 'auto',
+  },
+  candidateCard: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: '10px 12px',
+    background: '#fff',
+    border: '1px solid #e4e4e7',
+    borderRadius: 8,
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+    fontFamily: 'inherit',
+    textAlign: 'left',
+    width: '100%',
+  },
+  candidateCardSelected: {
+    background: '#f4f4f5',
+    borderColor: '#18181b',
+    boxShadow: '0 0 0 1px #18181b',
+  },
+  radioDot: {
+    flexShrink: 0,
+    width: 16,
+    height: 16,
+    borderRadius: '50%',
+    border: '1.5px solid #d4d4d8',
+    background: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioDotSelected: {
+    borderColor: '#18181b',
+  },
+  radioDotInner: {
+    width: 8,
+    height: 8,
+    borderRadius: '50%',
+    background: '#18181b',
+  },
+  candidateImage: {
+    width: 48,
+    height: 48,
+    objectFit: 'cover',
+    borderRadius: 6,
+    border: '1px solid #f4f4f5',
+    flexShrink: 0,
+    background: '#fafafa',
+  },
+  candidateImagePlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 6,
+    background: '#fafafa',
+    border: '1px solid #f4f4f5',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 22,
     flexShrink: 0,
   },
-  infoTitle: {
-    fontSize: 13,
-    fontWeight: 700,
-    color: '#1e40af',
-    margin: '2px 0 4px',
+  candidateInfo: {
+    flex: 1,
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
   },
-  infoText: {
+  candidateName: {
+    fontSize: 13.5,
+    fontWeight: 600,
+    color: '#18181b',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  candidateMeta: {
     fontSize: 12,
-    color: '#1e3a8a',
-    lineHeight: 1.55,
-    margin: 0,
+    color: '#71717a',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
   },
+  candidateMetaDot: { color: '#d4d4d8' },
 
   label: { display: 'flex', flexDirection: 'column', gap: 8 },
   labelText: {
@@ -363,18 +570,6 @@ const S = {
   },
   required: { color: '#dc2626', marginLeft: 2 },
   counter: { fontSize: 11, color: '#a1a1aa', fontWeight: 400, fontVariantNumeric: 'tabular-nums' },
-  input: {
-    width: '100%',
-    padding: '11px 14px',
-    background: '#fff',
-    border: '1px solid #e4e4e7',
-    borderRadius: 8,
-    color: '#18181b',
-    fontSize: 14,
-    fontFamily: 'inherit',
-    outline: 'none',
-    boxSizing: 'border-box',
-  },
   textarea: {
     width: '100%',
     padding: '11px 14px',
@@ -390,9 +585,7 @@ const S = {
     outline: 'none',
     boxSizing: 'border-box',
   },
-  ratingWrap: {
-    padding: '8px 0',
-  },
+  ratingWrap: { padding: '8px 0' },
 
   errorBox: {
     padding: '10px 14px',

@@ -395,6 +395,13 @@ export default function ProductDetail() {
     setReviewModalOpen(false);
     setReviewRefetchKey((k) => k + 1);
     showToast('리뷰가 등록되었습니다');
+
+    // 탭 헤더 카운트 갱신 — ProductTabs 가 product.reviewCount 를 직접 참조하므로
+    // 리뷰 등록 후 product 를 다시 fetch 해서 카운트를 최신화.
+    fetch(`${API_BASE}/products/${id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data) setProduct(data); })
+      .catch(() => { /* 카운트 갱신 실패는 silent — 리스트는 이미 refetchKey 로 갱신됨 */ });
   }
 
   if (loading) {
