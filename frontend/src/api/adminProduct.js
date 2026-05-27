@@ -17,11 +17,11 @@ export const adminProductApi = {
    * @param {Object} params - 모두 선택
    * @param {string} [params.status]      - ACTIVE / INACTIVE / SOLD_OUT
    * @param {string} [params.productType] - KEYBOARD / KEYCAP / SWITCH_PART / ACCESSORY
-   * @param {string} [params.search]      - 상품명 부분 일치
+   * @param {string} [params.search]      - 상품명 부분일치
    * @param {number} [params.page=0]
    * @param {number} [params.size=20]
    * @returns PagedResponse<AdminProductDto.ListItem>
-   *   { content: [{ id, name, brandName, imageUrl, price, stock, productType, status, createdAt }],
+   *   { content: [{ id, name, brandId, brandName, imageUrl, price, stock, productType, status, createdAt }],
    *     totalElements, totalPages, page, size, first, last, ... }
    */
   list: async (params = {}) => {
@@ -38,10 +38,26 @@ export const adminProductApi = {
    *
    * @param {number} id     - 대상 상품 id
    * @param {string} status - 'ACTIVE' / 'INACTIVE'
-   * @returns AdminProductDto.ListItem (변경 후 상품 정보)
+   * @returns AdminProductDto.ListItem (변경된 상품 정보)
    */
   updateStatus: async (id, status) => {
     const res = await apiClient.patch(`/admin/products/${id}/status`, { status });
+    return res.data;
+  },
+
+  /**
+   * PATCH /api/admin/products/{id}/brand
+   *
+   * 상품의 브랜드를 변경한다. brandId=null 이면 브랜드 미지정(연결 해제).
+   * 백엔드 brand_id 가 채워지면 ProductDto.Response.brandName 을 통해
+   * 사용자 측 ProductCard/ProductDetail 에도 자동 반영된다.
+   *
+   * @param {number} id              - 대상 상품 id
+   * @param {number|null} brandId    - 연결할 브랜드 id (null = 미지정)
+   * @returns AdminProductDto.ListItem (변경된 상품 정보)
+   */
+  updateBrand: async (id, brandId) => {
+    const res = await apiClient.patch(`/admin/products/${id}/brand`, { brandId });
     return res.data;
   },
 };

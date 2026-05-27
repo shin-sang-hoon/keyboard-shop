@@ -1,6 +1,7 @@
 // frontend/src/pages/admin/AdminProductPage.jsx
 //
 // Phase 7-G 라운드 5 (2026-05-25) — 관리자 상품 관리.
+// P1 (2026-05-27) — 브랜드 연동: 브랜드 컬럼을 읽기전용 → 드롭다운으로 전환.
 //
 // 기능:
 //   - 상품 목록 테이블 (썸네일 / 이름 / 브랜드 / 타입 / 가격 / 재고 / 상태)
@@ -9,12 +10,14 @@
 //   - productType 필터 (전체 / KEYBOARD / KEYCAP / SWITCH_PART / ACCESSORY)
 //   - 페이징 (이전 / 다음)
 //   - 상태 토글 버튼 (ACTIVE ↔ INACTIVE)
+//   - [P1] 브랜드 드롭다운 — 선택 즉시 PATCH /api/admin/products/{id}/brand 저장
 //
 // 디자인: swagkey 화이트 톤. AdminUserPage 와 동일 톤.
 
 import { useState, useEffect, useCallback } from 'react';
 import { colors, typography, spacing, radius, shadow } from '../../styles/tokens';
 import { adminProductApi } from '../../api/adminProduct';
+import { adminBrandApi } from '../../api/adminBrand';
 
 const PAGE_SIZE = 20;
 
@@ -43,6 +46,10 @@ export default function AdminProductPage() {
   const [page, setPage] = useState(0);
   const [updatingId, setUpdatingId] = useState(null);
 
+  // [P1] 브랜드 드롭다운 — 옵션 목록 + 변경 중 행 표시
+  const [brands, setBrands] = useState([]);
+  const [brandUpdatingId, setBrandUpdatingId] = useState(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -61,6 +68,15 @@ export default function AdminProductPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // [P1] 브랜드 드롭다운 옵션 — 마운트 시 1회 로드
+  useEffect(() => {
+    let cancelled = false;
+    adminBrandApi.list()
+      .then((list) => { if (!cancelled) setBrands(Array.isArray(list) ? list : []); })
+      .catch(() => { if (!cancelled) setBrands([]); });
+    return () => { cancelled = true; };
+  }, []);
 
   // 필터 변경 → 0페이지로 리셋
   const handleStatusChange = (value) => {
@@ -107,6 +123,25 @@ export default function AdminProductPage() {
     }
   };
 
+  // [P1] 브랜드 변경 (드롭다운 선택 → 즉시 저장)
+  const handleBrandChange = async (product, rawValue) => {
+    // rawValue: '' (미지정) 또는 brandId 문자열
+    const newBrandId = rawValue === '' ? null : Number(rawValue);
+    // 현재 값과 같으면 무시 (불필요한 요청 방지)
+    if ((product.brandId ?? null) === newBrandId) return;
+
+    setBrandUpdatingId(product.id);
+    try {
+      await adminProductApi.updateBrand(product.id, newBrandId);
+      await load();
+    } catch (e) {
+      const msg = e?.response?.data?.message || '브랜드 변경에 실패했습니다.';
+      window.alert(msg);
+    } finally {
+      setBrandUpdatingId(null);
+    }
+  };
+
   const fmtPrice = (v) => (v == null ? '-' : `₩${v.toLocaleString()}`);
 
   const fmtDate = (iso) => {
@@ -129,7 +164,7 @@ export default function AdminProductPage() {
       {/* 헤더 */}
       <div style={S.header}>
         <h2 style={S.title}>상품 관리</h2>
-        <p style={S.desc}>전체 상품 목록 · 타입/상태 필터 · 검색 · 노출 상태(판매중 / 숨김) 토글</p>
+        <p style={S.desc}>전체 상품 목록 · 타입/상태 필터 · 검색 · 노출 상태(판매중 / 숨김) 토글 · 브랜드 연동</p>
       </div>
 
       {/* 검색 + 필터 */}
@@ -192,7 +227,7 @@ export default function AdminProductPage() {
               <th style={{ ...S.th, width: '60px' }}>ID</th>
               <th style={{ ...S.th, width: '64px' }}>이미지</th>
               <th style={S.th}>상품명</th>
-              <th style={{ ...S.th, width: '120px' }}>브랜드</th>
+              <th style={{ ...S.th, width: '160px' }}>브랜드</th>
               <th style={{ ...S.th, width: '110px' }}>타입</th>
               <th style={{ ...S.th, width: '110px' }}>가격</th>
               <th style={{ ...S.th, width: '90px' }}>상태</th>
@@ -217,7 +252,24 @@ export default function AdminProductPage() {
                   )}
                 </td>
                 <td style={S.td}>{p.name}</td>
-                <td style={S.td}>{p.brandName || '-'}</td>
+                <td style={S.td}>
+                  {/* [P1] 브랜드 드롭다운 — 선택 즉시 저장 */}
+                  <select
+                    value={p.brandId ?? ''}
+                    onChange={(e) => handleBrandChange(p, e.target.value)}
+                    disabled={brandUpdatingId === p.id}
+                    style={{
+                      ...S.brandSelect,
+                      ...(brandUpdatingId === p.id ? S.brandSelectDisabled : {}),
+                    }}
+                    aria-label="브랜드 선택"
+                  >
+                    <option value="">(미지정)</option>
+                    {brands.map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                </td>
                 <td style={S.td}>
                   <span style={S.typeText}>{p.productType || '-'}</span>
                 </td>
@@ -427,6 +479,24 @@ const S = {
     fontSize: typography.fontSize.xs,
     color: colors.textOnLightDim,
     fontFamily: typography.fontFamily.mono,
+  },
+  // [P1] 브랜드 드롭다운
+  brandSelect: {
+    width: '100%',
+    padding: `${spacing[1]} ${spacing[2]}`,
+    fontSize: typography.fontSize.sm,
+    color: colors.textOnLight,
+    background: colors.white,
+    border: `1px solid ${colors.borderLight}`,
+    borderRadius: radius.sm,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    outline: 'none',
+  },
+  brandSelectDisabled: {
+    color: colors.textOnLightDim,
+    cursor: 'not-allowed',
+    opacity: 0.6,
   },
   badgeActive: {
     display: 'inline-block',

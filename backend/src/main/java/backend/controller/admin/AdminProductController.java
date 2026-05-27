@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
  * Endpoints:
  *   GET   /api/admin/products              — 상품 목록 (페이징 + 필터)
  *   PATCH /api/admin/products/{id}/status  — 상품 상태 토글 (ACTIVE ↔ INACTIVE)
+ *   PATCH /api/admin/products/{id}/brand   — 상품 브랜드 변경 (P1)
  *
  * 필터 파라미터 (목록, 모두 선택):
  *   status      : ACTIVE / INACTIVE / SOLD_OUT  (생략 시 전체)
@@ -64,5 +65,14 @@ public class AdminProductController {
             @RequestBody AdminProductDto.StatusUpdateRequest req
     ) {
         return ResponseEntity.ok(adminProductService.updateStatus(id, req.status()));
+    }
+
+    @PatchMapping("/{id}/brand")
+    @Operation(summary = "상품 브랜드 변경 (brandId=null 이면 미지정)")
+    public ResponseEntity<AdminProductDto.ListItem> updateBrand(
+            @PathVariable Long id,
+            @RequestBody AdminProductDto.BrandUpdateRequest req
+    ) {
+        return ResponseEntity.ok(adminProductService.updateBrand(id, req.brandId()));
     }
 }

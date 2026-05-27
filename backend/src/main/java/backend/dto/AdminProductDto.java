@@ -25,6 +25,7 @@ public final class AdminProductDto {
     public record ListItem(
             Long id,
             String name,
+            Long brandId,          // 드롭다운 현재 선택값 (brand 없으면 null)
             String brandName,      // brand 없으면 null
             String imageUrl,       // 썸네일 (없으면 null)
             Integer price,
@@ -37,6 +38,7 @@ public final class AdminProductDto {
             return new ListItem(
                     p.getId(),
                     p.getName(),
+                    p.getBrand() != null ? p.getBrand().getId() : null,
                     p.getBrand() != null ? p.getBrand().getName() : null,
                     p.getImageUrl(),
                     p.getPrice(),
@@ -54,6 +56,17 @@ public final class AdminProductDto {
      */
     public record StatusUpdateRequest(
             String status          // ACTIVE / INACTIVE
+    ) {
+    }
+
+    /**
+     * 브랜드 변경 요청 body.
+     * PATCH /api/admin/products/{id}/brand  { "brandId": 3 }
+     *
+     * brandId == null 이면 브랜드 미지정(연결 해제)으로 처리한다.
+     */
+    public record BrandUpdateRequest(
+            Long brandId
     ) {
     }
 }

@@ -2,10 +2,12 @@ package backend.service;
 
 import backend.dto.AdminProductDto;
 import backend.dto.PagedResponse;
+import backend.entity.Brand;
 import backend.entity.Product;
 import backend.entity.Product.ProductStatus;
 import backend.entity.Product.ProductType;
 import backend.exception.BusinessException;
+import backend.repository.BrandRepository;
 import backend.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -39,6 +41,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class AdminProductService {
 
     private final ProductRepository productRepository;
+    private final BrandRepository brandRepository;
 
     /** 페이지 크기 상한 (DOS 가드 — AuditLog/회원 관리와 동일 정책). */
     private static final int MAX_PAGE_SIZE = 100;
@@ -88,6 +91,37 @@ public class AdminProductService {
                         "상품을 찾을 수 없습니다. id=" + productId));
 
         product.setStatus(statusEnum);
+        // JPA dirty checking 으로 flush 시 UPDATE (명시적 save 불필요).
+
+        return AdminProductDto.ListItem.from(product);
+    }
+
+    /**
+     * 상품 브랜드 변경 (관리자).
+     *
+     * brandId 가 null 이면 브랜드 미지정(연결 해제). 그 외에는 해당 브랜드를
+     * 조회해 연결한다. JPA dirty checking 으로 flush 시 UPDATE.
+     *
+     * 사용자 측 반영: ProductDto.Response 에 brandName 필드가 이미 있어,
+     * brand_id 가 채워지면 ProductCard/ProductDetail 에 자동 전파된다.
+     *
+     * @param productId 대상 상품 id
+     * @param brandId   연결할 브랜드 id (null = 미지정)
+     */
+    @Transactional
+    public AdminProductDto.ListItem updateBrand(Long productId, Long brandId) {
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> BusinessException.notFound(
+                        "상품을 찾을 수 없습니다. id=" + productId));
+
+        if (brandId == null) {
+            product.setBrand(null);
+        } else {
+            Brand brand = brandRepository.findById(brandId)
+                    .orElseThrow(() -> BusinessException.notFound(
+                            "브랜드를 찾을 수 없습니다. id=" + brandId));
+            product.setBrand(brand);
+        }
         // JPA dirty checking 으로 flush 시 UPDATE (명시적 save 불필요).
 
         return AdminProductDto.ListItem.from(product);
