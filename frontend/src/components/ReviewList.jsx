@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import RatingDistributionChart from './RatingDistributionChart';
+import ReviewReportModal from './ReviewReportModal';
+import { useAuthStore } from '../stores/authStore';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
 
@@ -18,6 +20,10 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api
  *   - sort 변경 시 첫 페이지 reset + 자동 refetch
  *   - fetch URL 에 ?orderBy=${sort} 추가
  *   - 도움순(helpful) 만 disabled 유지 (도움 카운트 컬럼 부재)
+ *
+ * P0.5 변경 (7-G R8 사용자 측 연동):
+ *   - ReviewCard 에 신고 버튼 추가 → ReviewReportModal 띄움
+ *   - 백엔드 POST /api/reviews/{reviewId}/report (ReviewReportController) 와 연결
  *
  * 구성 (위 → 아래):
  *   [1] 헤더 — 정렬 dropdown (B6 활성화) + 작성 버튼
@@ -220,12 +226,25 @@ export default function ReviewList({ productId, onRequestWrite, refetchKey = 0 }
 
 function ReviewCard({ review }) {
   const {
+    id,
     rating,
     content,
     userName = '익명',
     createdAt,
     verifiedPurchase = true,
   } = review;
+
+  const [reportOpen, setReportOpen] = useState(false);
+
+  // 신고 버튼 클릭 — 비로그인 시 모달을 열지 않고 안내 (P0.5)
+  const handleReportClick = () => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) {
+      window.alert('로그인이 필요합니다.');
+      return;
+    }
+    setReportOpen(true);
+  };
 
   return (
     <div style={S.card}>
@@ -244,6 +263,26 @@ function ReviewCard({ review }) {
       </div>
 
       {content && <p style={S.cardContent}>{content}</p>}
+
+      {/* 신고 버튼 (7-G R8 사용자 측 연동, P0.5) */}
+      <div style={S.cardFooter}>
+        <button
+          type="button"
+          onClick={handleReportClick}
+          style={S.reportBtn}
+          aria-label="리뷰 신고"
+        >
+          🚩 신고
+        </button>
+      </div>
+
+      {/* 신고 모달 — 백엔드 POST /api/reviews/{id}/report */}
+      {reportOpen && (
+        <ReviewReportModal
+          reviewId={id}
+          onClose={() => setReportOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -482,6 +521,24 @@ const S = {
     margin: 0,
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
+  },
+
+  // P0.5: 신고 버튼 (카드 우하단)
+  cardFooter: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    marginTop: 10,
+  },
+  reportBtn: {
+    background: 'transparent',
+    border: 'none',
+    color: '#a1a1aa',
+    fontSize: 12,
+    fontWeight: 500,
+    cursor: 'pointer',
+    padding: '2px 4px',
+    fontFamily: 'inherit',
+    transition: 'color 0.15s ease',
   },
 
   starGroup: {
