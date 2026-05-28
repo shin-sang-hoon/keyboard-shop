@@ -8,8 +8,10 @@ import java.time.LocalDateTime;
  * 관리자 상품 관리 DTO (Phase 7-G 라운드 5).
  *
  * 중첩 구조:
- *   - AdminProductDto.ListItem          : 상품 목록 응답 1행
- *   - AdminProductDto.StatusUpdateRequest : 상태 변경 요청 body
+ *   - AdminProductDto.ListItem            : 상품 목록 응답 1행
+ *   - AdminProductDto.StatusUpdateRequest : 상태 변경 요청 body (ACTIVE/INACTIVE 노출 토글)
+ *   - AdminProductDto.BrandUpdateRequest  : 브랜드 변경 요청 body (P1)
+ *   - AdminProductDto.StockUpdateRequest  : 재고 변경 요청 body (P1 5/28 — 품절/재개)
  *
  * 공개 API 의 ProductDto.Response 와 분리한 이유:
  *   - 관리자 목록은 리뷰/QnA 집계, 다중 이미지가 불필요 → 가벼운 DTO.
@@ -67,6 +69,19 @@ public final class AdminProductDto {
      */
     public record BrandUpdateRequest(
             Long brandId
+    ) {
+    }
+
+    /**
+     * 재고 변경 요청 body (P1 5/28 — B-1 품절 방식).
+     * PATCH /api/admin/products/{id}/stock  { "stock": 0 }
+     *
+     * 관리자 [품절 처리] 버튼 → stock=0, [판매 재개] 버튼 → stock=기본값(양수).
+     * stock 은 0 이상이어야 하며, null 이면 badRequest 로 차단한다(Service 에서 검증).
+     * status(노출 on/off) 는 건드리지 않는다 — 품절은 stock 으로만 판정.
+     */
+    public record StockUpdateRequest(
+            Integer stock
     ) {
     }
 }

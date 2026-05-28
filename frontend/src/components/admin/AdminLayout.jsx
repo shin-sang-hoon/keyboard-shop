@@ -18,7 +18,7 @@
 import { useMemo } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { colors, typography, spacing, radius, shadow } from '../../styles/tokens';
+import { colors, typography, spacing, radius } from '../../styles/tokens';
 
 // ────────────────────────────────────────────────────────────────────────────
 // 사이드바 패널 정의
@@ -340,7 +340,9 @@ const S = {
   panel: {
     width: PANEL_W,
     background: colors.white,
-    borderRight: `1px solid ${colors.borderLight}`,
+    borderRightWidth: '1px',
+    borderRightStyle: 'solid',
+    borderRightColor: colors.borderLight,
     paddingTop: spacing[5],
     paddingLeft: spacing[3],
     paddingRight: spacing[3],
@@ -388,7 +390,9 @@ const S = {
   topbar: {
     height: 64,
     background: colors.white,
-    borderBottom: `1px solid ${colors.borderLight}`,
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: colors.borderLight,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -429,7 +433,9 @@ const S = {
     textDecoration: 'none',
     padding: `6px ${spacing[3]}`,
     borderRadius: radius.md,
-    border: `1px solid ${colors.borderLight}`,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.borderLight,
     transition: 'all 0.12s ease',
   },
 

@@ -348,11 +348,19 @@ export default function ProductDetail() {
   const addToCart = useCartStore((s) => s.addItem);
 
   function handleBuy() {
+    if (isSoldOut) {
+      showToast('품절된 상품입니다');
+      return;
+    }
     showToast('구매 페이지 준비 중입니다');
   }
 
   async function handleAddToCart() {
     if (!product) return;
+    if (isSoldOut) {
+      showToast('품절된 상품입니다');
+      return;
+    }
     if (activeAuction) {
       showToast('핫딜 상품은 입찰하러 가기를 이용해주세요');
       return;
@@ -429,6 +437,9 @@ export default function ProductDetail() {
   }
 
   const hasGlb = Boolean(product.glbUrl) && product.productType === 'KEYBOARD';
+  // 품절 판정 (B-1): ACTIVE 면서 stock===0. stock NULL/양수는 구매 가능.
+  // 핫딜(activeAuction) 상품은 입찰 흐름이라 품절 가드와 무관.
+  const isSoldOut = product.status === 'ACTIVE' && product.stock === 0;
 
   return (
     <div style={S.page}>
@@ -541,16 +552,22 @@ export default function ProductDetail() {
               <div style={S.metaRow}>
                 <span style={S.metaLabel}>재고</span>
                 <span style={S.metaValue}>
-                  {product.stock != null ? `${product.stock}개` : '정보 없음'}
+                  {product.stock == null
+                    ? '정보 없음'
+                    : product.stock === 0
+                      ? <span style={{ color: '#dc2626', fontWeight: 600 }}>품절</span>
+                      : `${product.stock}개`}
                 </span>
               </div>
               <div style={S.metaRow}>
                 <span style={S.metaLabel}>상태</span>
                 <span style={{
                   ...S.metaValue,
-                  color: product.status === 'ACTIVE' ? '#16a34a' : '#a1a1aa',
+                  color: isSoldOut ? '#dc2626' : product.status === 'ACTIVE' ? '#16a34a' : '#a1a1aa',
                 }}>
-                  {product.status === 'ACTIVE' ? '판매중' : product.status || '-'}
+                  {isSoldOut
+                    ? '품절'
+                    : product.status === 'ACTIVE' ? '판매중' : product.status || '-'}
                 </span>
               </div>
             </div>
@@ -563,10 +580,18 @@ export default function ProductDetail() {
             )}
 
             <div style={S.ctaRow}>
-              <button onClick={handleBuy} style={S.buyBtn}>
-                구매하기
+              <button
+                onClick={handleBuy}
+                disabled={isSoldOut}
+                style={{ ...S.buyBtn, ...(isSoldOut ? S.ctaDisabled : {}) }}
+              >
+                {isSoldOut ? '품절' : '구매하기'}
               </button>
-              <button onClick={handleAddToCart} style={S.cartBtn}>
+              <button
+                onClick={handleAddToCart}
+                disabled={isSoldOut}
+                style={{ ...S.cartBtn, ...(isSoldOut ? S.ctaDisabled : {}) }}
+              >
                 <span style={{ marginRight: 6 }}>🛒</span>
                 장바구니
               </button>
@@ -765,6 +790,10 @@ const S = {
     background: '#fff', border: '1px solid #d4d4d8', borderRadius: 8,
     cursor: 'pointer', transition: 'all 0.15s',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
+  ctaDisabled: {
+    background: '#e4e4e7', color: '#a1a1aa',
+    cursor: 'not-allowed', opacity: 0.7,
   },
 
   wishBtn: {

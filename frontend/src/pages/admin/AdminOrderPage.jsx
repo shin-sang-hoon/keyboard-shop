@@ -263,7 +263,11 @@ const S = {
     fontWeight: typography.fontWeight.medium,
     color: colors.textOnLightDim,
     background: colors.white,
-    border: `1px solid ${colors.borderLight}`,
+    // border shorthand 대신 longhand 3개로 분리 — filterBtnActive 에서 borderColor 만
+    // 덮어써도 React 의 shorthand 충돌 경고(메모 #12)가 안 난다.
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.borderLight,
     borderRadius: radius.md,
     cursor: 'pointer',
   },

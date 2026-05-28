@@ -98,23 +98,35 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     // ─── 7-G 라운드 5 (5/25): 관리자 상품 관리 ──────────────────────────
     /**
-     * 관리자 상품 목록 — status / productType / search 3개 모두 선택(NULL 허용).
+     * 관리자 상품 목록 — status / productType / search / soldOut 모두 선택(NULL 허용).
      *
      * 공개 API 의 findActiveWithFilters 와 구분되는 점:
      *   - status 도 NULL 허용 → ACTIVE/INACTIVE 전체 조회 가능 (관리자는 숨긴 상품도 봐야 함).
      *   - GLB 우선 CASE 정렬 제거 → 관리자 목록은 Pageable 의 sort(기본 id) 를 그대로 따름.
      *   findActiveWithFilters 를 건드리지 않고 별도 메서드로 분리 — 공개 API 의
      *   "항상 ACTIVE 만 노출" 불변식(면접 자산)을 깨지 않기 위함.
+     *
+     * soldOut 필터 (P1, 5/28 — B-1 방식):
+     *   - 품절은 ProductStatus 값(SOLD_OUT)이 아니라 stock 으로 판정한다 (status 축과 직교).
+     *     status(노출 on/off) 와 품절(재고 유무) 은 별개 차원이므로 stock 으로만 본다.
+     *   - soldOut == null  → stock 조건 무시 (기존 동작 그대로, 회귀 안전).
+     *   - soldOut == TRUE  → stock 이 0 인 상품만 (품절).
+     *   - soldOut == FALSE → stock 이 NULL 이거나 0 초과인 상품 (재고 있음).
+     *   프론트 [품절] 필터는 status=ACTIVE 와 함께 soldOut=true 를 보낸다.
      */
     @EntityGraph(attributePaths = {"brand", "category"})
     @Query("SELECT p FROM Product p WHERE " +
            "(:status IS NULL OR p.status = :status) " +
            "AND (:search IS NULL OR :search = '' OR LOWER(p.name) LIKE LOWER(CONCAT('%', :search, '%'))) " +
-           "AND (:productType IS NULL OR p.productType = :productType)")
+           "AND (:productType IS NULL OR p.productType = :productType) " +
+           "AND (:soldOut IS NULL " +
+           "     OR (:soldOut = TRUE  AND p.stock IS NOT NULL AND p.stock = 0) " +
+           "     OR (:soldOut = FALSE AND (p.stock IS NULL OR p.stock > 0)))")
     Page<Product> findForAdmin(
             @Param("search") String search,
             @Param("productType") ProductType productType,
             @Param("status") ProductStatus status,
+            @Param("soldOut") Boolean soldOut,
             Pageable pageable);
 
     // ─── Flash Deal 임계값 (5/17) ──────────────────────────────────

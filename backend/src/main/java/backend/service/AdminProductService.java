@@ -21,16 +21,19 @@ import org.springframework.transaction.annotation.Transactional;
  * 관리자 상품 관리 서비스 (Phase 7-G 라운드 5).
  *
  * 기능:
- *   - 상품 목록 조회 (페이징 + status / productType / search 필터)
+ *   - 상품 목록 조회 (페이징 + status / productType / search / soldOut 필터)
  *   - 상품 상태 토글 (ACTIVE ↔ INACTIVE — 상품 노출 on/off)
+ *   - 상품 브랜드 변경 (P1)
+ *   - 상품 재고 변경 (P1 5/28 — 품절/판매재개)
  *
  * 설계 노트:
  *   - 공개 API(ProductService.getAllProducts) 와 분리. 공개 API 는 ACTIVE 만,
  *     관리자는 INACTIVE 숨김 상품까지 봐야 하므로 Repository.findForAdmin 사용.
  *   - 필터는 모두 NULL 허용 — 비어 있으면 전체.
  *   - 정렬: id 내림차순 (최근 등록 상품 먼저).
- *   - 상태 토글은 ACTIVE/INACTIVE 2-state 만 허용. SOLD_OUT 은 재고 0 자동
- *     처리 영역이라 관리자 수동 토글 대상에서 제외 (badRequest 로 차단).
+ *   - 상태 토글은 ACTIVE/INACTIVE 2-state 만 허용. SOLD_OUT enum 값은 존재하지만
+ *     B-1 방식(5/28)에서 품절은 stock=0 으로만 판정하므로 status 토글 대상에서 제외.
+ *   - 품절(soldOut) 은 status 축과 직교 — stock 으로만 판정. updateStock 으로 0↔양수 전환.
  *   - @Cacheable 갱신 주의: 공개 목록 캐시(products_v3)는 ACTIVE 만 담으므로
  *     관리자가 ACTIVE→INACTIVE 로 내려도 캐시에 잔존할 수 있음. 운영에선
  *     캐시 evict 가 필요하지만, 현재 캐시 TTL 로 자연 만료되며 포트폴리오
@@ -46,18 +49,22 @@ public class AdminProductService {
     /** 페이지 크기 상한 (DOS 가드 — AuditLog/회원 관리와 동일 정책). */
     private static final int MAX_PAGE_SIZE = 100;
 
+    /** [판매 재개] 시 채워 넣는 기본 재고 수량. */
+    private static final int DEFAULT_RESTOCK = 100;
+
     /**
      * 관리자 상품 목록 (페이징 + 필터).
      *
      * @param status      "ACTIVE" / "INACTIVE" / "SOLD_OUT" / null·"" (전체)
      * @param productType "KEYBOARD" / "KEYCAP" / ... / null·"" (전체)
      * @param search      상품명 부분 일치 / null·"" (전체)
+     * @param soldOut     true=품절(stock=0)만 / false=재고있음만 / null=전체
      * @param page        0-indexed
      * @param size        1~100
      */
     @Transactional(readOnly = true)
     public PagedResponse<AdminProductDto.ListItem> list(
-            String status, String productType, String search, int page, int size) {
+            String status, String productType, String search, Boolean soldOut, int page, int size) {
 
         int safeSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
         Pageable pageable = PageRequest.of(
@@ -71,7 +78,7 @@ public class AdminProductService {
         String searchOrNull = (search == null || search.isBlank()) ? null : search.trim();
 
         Page<Product> result = productRepository.findForAdmin(
-                searchOrNull, typeEnum, statusEnum, pageable);
+                searchOrNull, typeEnum, statusEnum, soldOut, pageable);
 
         return PagedResponse.from(result.map(AdminProductDto.ListItem::from));
     }
@@ -122,6 +129,32 @@ public class AdminProductService {
                             "브랜드를 찾을 수 없습니다. id=" + brandId));
             product.setBrand(brand);
         }
+        // JPA dirty checking 으로 flush 시 UPDATE (명시적 save 불필요).
+
+        return AdminProductDto.ListItem.from(product);
+    }
+
+    /**
+     * 상품 재고 변경 (P1 5/28 — B-1 품절 방식).
+     *
+     * 관리자 [품절 처리] = stock 0, [판매 재개] = stock 양수(프론트가 DEFAULT_RESTOCK 전달).
+     * status(노출 on/off) 는 건드리지 않는다 — 품절은 stock 으로만 판정하므로
+     * 기존 숨김 토글 로직과 완전히 독립적이다.
+     *
+     * @param productId 대상 상품 id
+     * @param stock     설정할 재고 수량 (0 이상). null/음수면 badRequest.
+     */
+    @Transactional
+    public AdminProductDto.ListItem updateStock(Long productId, Integer stock) {
+        if (stock == null || stock < 0) {
+            throw BusinessException.badRequest("재고는 0 이상의 정수여야 합니다.");
+        }
+
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> BusinessException.notFound(
+                        "상품을 찾을 수 없습니다. id=" + productId));
+
+        product.setStock(stock);
         // JPA dirty checking 으로 flush 시 UPDATE (명시적 save 불필요).
 
         return AdminProductDto.ListItem.from(product);
