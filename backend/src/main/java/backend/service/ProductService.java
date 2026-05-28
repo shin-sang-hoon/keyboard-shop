@@ -43,38 +43,43 @@ public class ProductService {
     private final QnARepository qnaRepository;
 
     /**
-     * 상품 목록 조회 — 페이지네이션 + 검색 + productType 필터 + status='ACTIVE' 강제.
+     * 상품 목록 조회 — 페이지네이션 + 검색 + productType 필터 + subCategoryId 필터 + status='ACTIVE' 강제.
      *
      * 5-H 후속 (5/10) 변경:
      *   - 4-way 분기 → 단일 JPQL 통합 (productRepository.findActiveWithFilters)
      *   - 공개 API 는 항상 ACTIVE 만 노출 (V3 SQL 로 INACTIVE 처리한 데이터 자동 hide)
-     *   - 캐시 v2 → v3 bump (stale 캐시 무효화, 4/27 PageImpl 사고와 동일 패턴)
+     *
+     * P2 (5/28) 변경:
+     *   - subCategoryId 필터 추가 (사용자단 측면 필터 — 하위 카테고리별 상품)
+     *   - @Cacheable 캐시 키에 subCategoryId 반영 + products_v3 → products_v4 bump
+     *     (키에 안 넣으면 다른 하위카테고리가 같은 캐시 반환하는 버그 — 4/27 stale 사고 패턴)
      *
      * 5-H B1 enrichment 패턴:
      *   1) Page<Product> 가져오기 (EntityGraph 로 brand/category JOIN FETCH — Step 4)
      *   2) ID 리스트 추출 → 3개 IN 절 일괄 쿼리 (images / review-stats / qna-count)
      *   3) Map<productId, ...> 으로 lookup → DTO 빌드
      *
-     * 쿼리 카운트: 24개 페이지 = 5쿼리 (count 1 + page 1 + images 1 + review 1 + qna 1)
-     * 페이지 크기 무관하게 상수. @Formula 서브쿼리 컬럼 (3N 추가) 보다 효율적.
-     *
-     * @Cacheable products_v3 캐시는 PagedResponse 직렬화 (PageImpl 아님 — 4/27 사고 회피).
+     * @Cacheable products_v4 캐시는 PagedResponse 직렬화 (PageImpl 아님 — 4/27 사고 회피).
      */
     @Cacheable(
-            value = "products_v3",
+            value = "products_v4",
             key = "(#search == null ? 'all' : #search.trim().toLowerCase()) + '-' " +
                     "+ (#productType == null ? 'any' : #productType.name()) + '-' " +
+                    "+ (#subCategoryId == null ? 'anysub' : #subCategoryId) + '-' " +
                     "+ #pageable.pageNumber + '-' + #pageable.pageSize"
     )
-    public PagedResponse<ProductDto.Response> getAllProducts(String search, ProductType productType, Pageable pageable) {
+    public PagedResponse<ProductDto.Response> getAllProducts(String search, ProductType productType,
+                                                             Long subCategoryId, Pageable pageable) {
         boolean hasSearch = search != null && !search.isBlank();
         String trimmed = hasSearch ? search.trim() : null;
 
         // 5-H 후속 (5/10): 4-way 분기 → 단일 JPQL 호출 + status='ACTIVE' 강제
+        // P2 (5/28): subCategoryId 필터 추가
         Page<Product> page = productRepository.findActiveWithFilters(
                 trimmed,
                 productType,
                 Product.ProductStatus.ACTIVE,
+                subCategoryId,
                 pageable
         );
 
@@ -99,7 +104,7 @@ public class ProductService {
     }
 
     @Transactional
-    @CacheEvict(value = "products_v3", allEntries = true)
+    @CacheEvict(value = "products_v4", allEntries = true)
     public ProductDto.Response createProduct(ProductDto.Request request) {
         Brand brand = request.getBrandId() != null ?
                 brandRepository.findById(request.getBrandId()).orElse(null) : null;
@@ -130,7 +135,7 @@ public class ProductService {
     }
 
     @Transactional
-    @CacheEvict(value = "products_v3", allEntries = true)
+    @CacheEvict(value = "products_v4", allEntries = true)
     public ProductDto.Response updateProduct(Long id, ProductDto.Request request) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("상품을 찾을 수 없습니다."));
@@ -165,7 +170,7 @@ public class ProductService {
     }
 
     @Transactional
-    @CacheEvict(value = "products_v3", allEntries = true)
+    @CacheEvict(value = "products_v4", allEntries = true)
     public void deleteProduct(Long id) {
         productRepository.deleteById(id);
     }

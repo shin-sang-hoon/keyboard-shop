@@ -24,6 +24,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { colors, typography, spacing, radius, shadow } from '../../styles/tokens';
 import { adminProductApi, DEFAULT_RESTOCK } from '../../api/adminProduct';
 import { adminBrandApi } from '../../api/adminBrand';
+import { adminSubCategoryApi } from '../../api/adminSubCategory';
 
 const PAGE_SIZE = 20;
 
@@ -87,6 +88,11 @@ export default function AdminProductPage() {
   const [brands, setBrands] = useState([]);
   const [brandUpdatingId, setBrandUpdatingId] = useState(null);
 
+  // [P2] 하위 카테고리 드롭다운 — productType 별 옵션 맵 + 변경 중 행 표시
+  //   subCatMap = { KEYBOARD: [{id,name,...}], KEYCAP: [...], ... }
+  const [subCatMap, setSubCatMap] = useState({});
+  const [subCatUpdatingId, setSubCatUpdatingId] = useState(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -113,6 +119,23 @@ export default function AdminProductPage() {
     adminBrandApi.list()
       .then((list) => { if (!cancelled) setBrands(Array.isArray(list) ? list : []); })
       .catch(() => { if (!cancelled) setBrands([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // [P2] 하위 카테고리 옵션 — 마운트 시 전체 1회 로드 후 productType 별로 그룹화.
+  //   전체 목록 1회 호출 → 행마다 자기 productType 의 하위분류를 드롭다운에 노출.
+  useEffect(() => {
+    let cancelled = false;
+    adminSubCategoryApi.list()  // productType 없이 전체
+      .then((list) => {
+        if (cancelled) return;
+        const map = {};
+        (Array.isArray(list) ? list : []).forEach((s) => {
+          (map[s.productType] ||= []).push(s);
+        });
+        setSubCatMap(map);
+      })
+      .catch(() => { if (!cancelled) setSubCatMap({}); });
     return () => { cancelled = true; };
   }, []);
 
@@ -199,6 +222,24 @@ export default function AdminProductPage() {
       window.alert(msg);
     } finally {
       setBrandUpdatingId(null);
+    }
+  };
+
+  // [P2] 하위 카테고리 변경 (드롭다운 선택 → 즉시 저장)
+  const handleSubCategoryChange = async (product, rawValue) => {
+    // rawValue: '' (미지정) 또는 subCategoryId 문자열
+    const newSubId = rawValue === '' ? null : Number(rawValue);
+    if ((product.subCategoryId ?? null) === newSubId) return;
+
+    setSubCatUpdatingId(product.id);
+    try {
+      await adminProductApi.updateSubCategory(product.id, newSubId);
+      await load();
+    } catch (e) {
+      const msg = e?.response?.data?.message || '하위 카테고리 변경에 실패했습니다.';
+      window.alert(msg);
+    } finally {
+      setSubCatUpdatingId(null);
     }
   };
 
@@ -296,6 +337,7 @@ export default function AdminProductPage() {
               <th style={S.th}>상품명</th>
               <th style={{ ...S.th, width: '160px' }}>브랜드</th>
               <th style={{ ...S.th, width: '100px' }}>카테고리</th>
+              <th style={{ ...S.th, width: '140px' }}>하위분류</th>
               <th style={{ ...S.th, width: '100px' }}>가격</th>
               <th style={{ ...S.th, width: '80px' }}>재고</th>
               <th style={{ ...S.th, width: '90px' }}>상태</th>
@@ -304,10 +346,10 @@ export default function AdminProductPage() {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={9} style={S.emptyCell}>불러오는 중...</td></tr>
+              <tr><td colSpan={10} style={S.emptyCell}>불러오는 중...</td></tr>
             )}
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={9} style={S.emptyCell}>상품이 없습니다.</td></tr>
+              <tr><td colSpan={10} style={S.emptyCell}>상품이 없습니다.</td></tr>
             )}
             {!loading && rows.map((p) => (
               <tr key={p.id} style={S.tr}>
@@ -340,6 +382,30 @@ export default function AdminProductPage() {
                 </td>
                 <td style={S.td}>
                   <span style={S.typeText}>{fmtCategory(p.productType)}</span>
+                </td>
+                <td style={S.td}>
+                  {/* [P2] 하위 카테고리 드롭다운 — 선택 즉시 저장 */}
+                  {(() => {
+                    const opts = subCatMap[p.productType] || [];
+                    // 운영 대상 외 type(MOUSE/NOISE/UNCLASSIFIED)은 옵션이 없을 수 있음
+                    return (
+                      <select
+                        value={p.subCategoryId ?? ''}
+                        onChange={(e) => handleSubCategoryChange(p, e.target.value)}
+                        disabled={subCatUpdatingId === p.id || opts.length === 0}
+                        style={{
+                          ...S.brandSelect,
+                          ...((subCatUpdatingId === p.id || opts.length === 0) ? S.brandSelectDisabled : {}),
+                        }}
+                        aria-label="하위 카테고리 선택"
+                      >
+                        <option value="">(미지정)</option>
+                        {opts.map((s) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    );
+                  })()}
                 </td>
                 <td style={S.td}>{fmtPrice(p.price)}</td>
                 <td style={S.td}>
@@ -493,7 +559,9 @@ const S = {
     fontWeight: typography.fontWeight.medium,
     color: colors.textOnLightDim,
     background: colors.white,
-    border: `1px solid ${colors.borderLight}`,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.borderLight,
     borderRadius: radius.md,
     cursor: 'pointer',
   },

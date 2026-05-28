@@ -28,6 +28,11 @@ public class Product {
     @JoinColumn(name = "category_id")
     private Category category;
 
+    // P2 (5/28): 하위 카테고리 — product_type 종속 분류. V18 에서 컬럼/FK/기타 시드.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "sub_category_id")
+    private SubCategory subCategory;
+
     @Column(nullable = false)
     private String name;
 

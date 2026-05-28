@@ -341,6 +341,7 @@ export default function ProductList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const productType = searchParams.get('productType') || null;
   const urlSearch = searchParams.get('search') || '';
+  const subCategoryId = searchParams.get('subCategoryId') || null;
 
   const [products, setProducts] = useState([]);
   const [totalElements, setTotalElements] = useState(0);
@@ -349,10 +350,27 @@ export default function ProductList() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // 카테고리/검색 변경 시 첫 페이지로
+  // [P2] 측면 필터용 하위 카테고리 목록 — productType 이 있을 때만 로드
+  const [subCategories, setSubCategories] = useState([]);
+
+  // productType 별 하위 카테고리 로드 (productType 없으면 비움)
+  useEffect(() => {
+    if (!productType) {
+      setSubCategories([]);
+      return;
+    }
+    const controller = new AbortController();
+    fetch(`${API_BASE}/sub-categories?productType=${productType}`, { signal: controller.signal })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) => setSubCategories(Array.isArray(list) ? list : []))
+      .catch((err) => { if (err.name !== 'AbortError') setSubCategories([]); });
+    return () => controller.abort();
+  }, [productType]);
+
+  // 카테고리/검색/하위분류 변경 시 첫 페이지로
   useEffect(() => {
     setPage(0);
-  }, [productType, urlSearch]);
+  }, [productType, urlSearch, subCategoryId]);
 
   // API 호출 (AbortController 로 race condition 방지)
   // React StrictMode dev 모드 이중 호출 + 빠른 탭/검색 전환 시
@@ -365,6 +383,7 @@ export default function ProductList() {
     params.set('size', PAGE_SIZE);
     if (productType) params.set('productType', productType);
     if (urlSearch) params.set('search', urlSearch);
+    if (subCategoryId) params.set('subCategoryId', subCategoryId);
 
     const url = `${API_BASE}/products?${params.toString()}`;
 
@@ -395,7 +414,7 @@ export default function ProductList() {
       });
 
     return () => controller.abort();
-  }, [page, productType, urlSearch]);
+  }, [page, productType, urlSearch, subCategoryId]);
 
   const clearSearch = () => {
     const next = new URLSearchParams(searchParams);
@@ -403,12 +422,41 @@ export default function ProductList() {
     setSearchParams(next);
   };
 
-  return (
-    <div style={{ padding: 24, maxWidth: 1400, margin: '0 auto' }}>
+  // [P2] 하위 카테고리 선택/해제 — URL ?subCategoryId 갱신.
+  //   같은 걸 또 누르면 토글 해제. productType 은 유지.
+  const handleSubCategoryClick = (id) => {
+    const next = new URLSearchParams(searchParams);
+    if (String(id) === subCategoryId) {
+      next.delete('subCategoryId');   // 토글 off
+    } else {
+      next.set('subCategoryId', String(id));
+    }
+    setSearchParams(next);
+  };
+
+  const clearSubCategory = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('subCategoryId');
+    setSearchParams(next);
+  };
+
+  const activeSubName = subCategoryId
+    ? (subCategories.find((s) => String(s.id) === subCategoryId)?.name || null)
+    : null;
+
+  // 본문(상품 그리드 + 페이징) — 사이드바 유무와 무관하게 동일
+  const mainContent = (
+    <div style={{ flex: 1, minWidth: 0 }}>
       <h1 style={{ marginBottom: 8 }}>키보드 쇼핑몰</h1>
       <p style={{ color: '#71717a', marginBottom: 24, fontSize: 14 }}>
         총 {totalElements.toLocaleString()}개 상품
         {productType && ` · ${CATEGORY_LABELS[productType] || productType}`}
+        {activeSubName && (
+          <>
+            {' '}
+            <span style={{ color: '#6366f1', fontWeight: 600 }}>&gt; {activeSubName}</span>
+          </>
+        )}
         {urlSearch && (
           <>
             {' · '}
@@ -467,6 +515,71 @@ export default function ProductList() {
           <Pagination page={page} totalPages={totalPages} onChange={setPage} />
         </>
       )}
+    </div>
+  );
+
+  // [P2] 측면 필터 — productType 이 있고 하위 카테고리가 1개 초과일 때만 노출.
+  //   '기타'만 있으면(미분류 상태) 필터 의미가 없으므로 숨김.
+  const showSidebar = productType && subCategories.length > 1;
+
+  return (
+    <div style={{ padding: 24, maxWidth: 1400, margin: '0 auto' }}>
+      <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
+        {showSidebar && (
+          <aside style={{
+            width: 200, flexShrink: 0,
+            position: 'sticky', top: 24,
+          }}>
+            <div style={{
+              fontSize: 13, fontWeight: 700, color: '#18181b',
+              marginBottom: 12, paddingBottom: 8,
+              borderBottom: '1px solid #e4e4e7',
+            }}>
+              {CATEGORY_LABELS[productType] || productType} 하위 분류
+            </div>
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <li>
+                <button
+                  onClick={clearSubCategory}
+                  style={{
+                    width: '100%', textAlign: 'left',
+                    padding: '8px 10px', fontSize: 13,
+                    background: subCategoryId ? 'transparent' : '#eef2ff',
+                    color: subCategoryId ? '#52525b' : '#4f46e5',
+                    fontWeight: subCategoryId ? 400 : 600,
+                    borderWidth: '0', borderStyle: 'none', borderColor: 'transparent',
+                    borderRadius: 6, cursor: 'pointer',
+                  }}
+                >
+                  전체
+                </button>
+              </li>
+              {subCategories.map((s) => {
+                const active = String(s.id) === subCategoryId;
+                return (
+                  <li key={s.id}>
+                    <button
+                      onClick={() => handleSubCategoryClick(s.id)}
+                      style={{
+                        width: '100%', textAlign: 'left',
+                        padding: '8px 10px', fontSize: 13,
+                        background: active ? '#eef2ff' : 'transparent',
+                        color: active ? '#4f46e5' : '#52525b',
+                        fontWeight: active ? 600 : 400,
+                        borderWidth: '0', borderStyle: 'none', borderColor: 'transparent',
+                        borderRadius: 6, cursor: 'pointer',
+                      }}
+                    >
+                      {s.name}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </aside>
+        )}
+        {mainContent}
+      </div>
     </div>
   );
 }

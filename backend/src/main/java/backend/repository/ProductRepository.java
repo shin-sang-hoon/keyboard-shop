@@ -68,11 +68,13 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
            "p.status = :status " +
            "AND (:search IS NULL OR :search = '' OR LOWER(p.name) LIKE LOWER(CONCAT('%', :search, '%'))) " +
            "AND (:productType IS NULL OR p.productType = :productType) " +
+           "AND (:subCategoryId IS NULL OR p.subCategory.id = :subCategoryId) " +
            "ORDER BY CASE WHEN (p.glbUrl IS NULL OR p.glbUrl = '') THEN 1 ELSE 0 END ASC, p.id ASC")
     Page<Product> findActiveWithFilters(
             @Param("search") String search,
             @Param("productType") ProductType productType,
             @Param("status") ProductStatus status,
+            @Param("subCategoryId") Long subCategoryId,
             Pageable pageable);
 
     // ─── 7-G 라운드 3 (5/24): 관리자 대시보드 통계 ──────────────────────
@@ -95,6 +97,14 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * AdminBrandService.deleteBrand 가 호출 — 사용 중이면 삭제 거부(409).
      */
     long countByBrandId(Long brandId);
+
+    /**
+     * 특정 하위 카테고리에 속한 상품 수 (P2, 5/28).
+     * AdminSubCategoryService.delete 가 호출 — 사용 중이면 삭제 거부(409).
+     * toResponse 의 productCount 집계에도 사용.
+     * Product.subCategory(ManyToOne) 연관 → 파생 쿼리로 sub_category_id 매핑.
+     */
+    long countBySubCategoryId(Long subCategoryId);
 
     // ─── 7-G 라운드 5 (5/25): 관리자 상품 관리 ──────────────────────────
     /**

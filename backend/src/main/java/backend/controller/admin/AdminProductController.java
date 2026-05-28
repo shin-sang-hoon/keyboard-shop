@@ -17,10 +17,11 @@ import org.springframework.web.bind.annotation.*;
  * 별도 @PreAuthorize 불필요 (AdminAuditLogController 와 동일 패턴).
  *
  * Endpoints:
- *   GET   /api/admin/products              — 상품 목록 (페이징 + 필터)
- *   PATCH /api/admin/products/{id}/status  — 상품 상태 토글 (ACTIVE ↔ INACTIVE)
- *   PATCH /api/admin/products/{id}/brand   — 상품 브랜드 변경 (P1)
- *   PATCH /api/admin/products/{id}/stock   — 상품 재고 변경 (P1 5/28 — 품절/판매재개)
+ *   GET   /api/admin/products                  — 상품 목록 (페이징 + 필터)
+ *   PATCH /api/admin/products/{id}/status      — 상품 상태 토글 (ACTIVE ↔ INACTIVE)
+ *   PATCH /api/admin/products/{id}/brand       — 상품 브랜드 변경 (P1)
+ *   PATCH /api/admin/products/{id}/stock       — 상품 재고 변경 (P1 5/28 — 품절/판매재개)
+ *   PATCH /api/admin/products/{id}/sub-category — 상품 하위 카테고리 변경 (P2 5/28)
  *
  * 필터 파라미터 (목록, 모두 선택):
  *   status      : ACTIVE / INACTIVE / SOLD_OUT  (생략 시 전체)
@@ -88,5 +89,14 @@ public class AdminProductController {
             @RequestBody AdminProductDto.StockUpdateRequest req
     ) {
         return ResponseEntity.ok(adminProductService.updateStock(id, req.stock()));
+    }
+
+    @PatchMapping("/{id}/sub-category")
+    @Operation(summary = "상품 하위 카테고리 변경 (subCategoryId=null 이면 미지정, product_type 일치 검증)")
+    public ResponseEntity<AdminProductDto.ListItem> updateSubCategory(
+            @PathVariable Long id,
+            @RequestBody AdminProductDto.SubCategoryUpdateRequest req
+    ) {
+        return ResponseEntity.ok(adminProductService.updateSubCategory(id, req.subCategoryId()));
     }
 }

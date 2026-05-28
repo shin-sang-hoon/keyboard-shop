@@ -82,6 +82,22 @@ export const adminProductApi = {
     const res = await apiClient.patch(`/admin/products/${id}/stock`, { stock });
     return res.data;
   },
+
+  /**
+   * PATCH /api/admin/products/{id}/sub-category  (P2 5/28)
+   *
+   * 상품의 하위 카테고리를 변경한다. subCategoryId=null 이면 미지정(연결 해제).
+   * 백엔드가 product_type 일치를 검증 — 상품 대분류와 다른 하위분류는 400.
+   * 지정되면 사용자 측 ProductList 측면 필터(subCategoryId)에 자동 반영.
+   *
+   * @param {number} id                  - 대상 상품 id
+   * @param {number|null} subCategoryId  - 연결할 하위분류 id (null = 미지정)
+   * @returns AdminProductDto.ListItem (변경된 상품 정보)
+   */
+  updateSubCategory: async (id, subCategoryId) => {
+    const res = await apiClient.patch(`/admin/products/${id}/sub-category`, { subCategoryId });
+    return res.data;
+  },
 };
 
 export default adminProductApi;

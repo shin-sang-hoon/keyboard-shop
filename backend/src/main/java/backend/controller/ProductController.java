@@ -22,25 +22,27 @@ public class ProductController {
     private final ProductService productService;
 
     /**
-     * 상품 목록 조회 - 페이지네이션 + 검색 + productType 필터
+     * 상품 목록 조회 - 페이지네이션 + 검색 + productType 필터 + subCategoryId 필터
      *
      * Query parameters:
      *  - page (default: 0)            페이지 번호
      *  - size (default: 20)           페이지 크기
      *  - search (optional)            상품명 부분 일치 검색 (대소문자 무시)
      *  - productType (optional)       enum: KEYBOARD/KEYCAP/SWITCH_PART/ACCESSORY/NOISE/UNCLASSIFIED (MOUSE deprecated)
+     *  - subCategoryId (optional)     하위 카테고리 id (P2 — 측면 필터)
      *  - sort (default: createdAt,desc)
      *
      * 응답: PagedResponse<ProductDto.Response>
      *   PageImpl 직접 직렬화 시 미래 Spring Data 호환성 경고 - PagedResponse 로 wrap
      */
     @GetMapping
-    @Operation(summary = "상품 목록 조회 (페이지네이션 + 검색 + 타입 필터)")
+    @Operation(summary = "상품 목록 조회 (페이지네이션 + 검색 + 타입 + 하위카테고리 필터)")
     public ResponseEntity<PagedResponse<ProductDto.Response>> getAllProducts(
             @RequestParam(required = false) String search,
             @RequestParam(required = false) ProductType productType,
+            @RequestParam(required = false) Long subCategoryId,
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
-        return ResponseEntity.ok(productService.getAllProducts(search, productType, pageable));
+        return ResponseEntity.ok(productService.getAllProducts(search, productType, subCategoryId, pageable));
     }
 
     @GetMapping("/{id}")

@@ -6,9 +6,11 @@ import backend.entity.Brand;
 import backend.entity.Product;
 import backend.entity.Product.ProductStatus;
 import backend.entity.Product.ProductType;
+import backend.entity.SubCategory;
 import backend.exception.BusinessException;
 import backend.repository.BrandRepository;
 import backend.repository.ProductRepository;
+import backend.repository.SubCategoryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -25,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
  *   - 상품 상태 토글 (ACTIVE ↔ INACTIVE — 상품 노출 on/off)
  *   - 상품 브랜드 변경 (P1)
  *   - 상품 재고 변경 (P1 5/28 — 품절/판매재개)
+ *   - 상품 하위 카테고리 변경 (P2 5/28 — product_type 일치 가드)
  *
  * 설계 노트:
  *   - 공개 API(ProductService.getAllProducts) 와 분리. 공개 API 는 ACTIVE 만,
@@ -34,10 +37,6 @@ import org.springframework.transaction.annotation.Transactional;
  *   - 상태 토글은 ACTIVE/INACTIVE 2-state 만 허용. SOLD_OUT enum 값은 존재하지만
  *     B-1 방식(5/28)에서 품절은 stock=0 으로만 판정하므로 status 토글 대상에서 제외.
  *   - 품절(soldOut) 은 status 축과 직교 — stock 으로만 판정. updateStock 으로 0↔양수 전환.
- *   - @Cacheable 갱신 주의: 공개 목록 캐시(products_v3)는 ACTIVE 만 담으므로
- *     관리자가 ACTIVE→INACTIVE 로 내려도 캐시에 잔존할 수 있음. 운영에선
- *     캐시 evict 가 필요하지만, 현재 캐시 TTL 로 자연 만료되며 포트폴리오
- *     범위에서는 수용 가능 (면접 talking: cache invalidation 과제로 언급).
  */
 @Service
 @RequiredArgsConstructor
@@ -45,6 +44,7 @@ public class AdminProductService {
 
     private final ProductRepository productRepository;
     private final BrandRepository brandRepository;
+    private final SubCategoryRepository subCategoryRepository;
 
     /** 페이지 크기 상한 (DOS 가드 — AuditLog/회원 관리와 동일 정책). */
     private static final int MAX_PAGE_SIZE = 100;
@@ -155,6 +155,51 @@ public class AdminProductService {
                         "상품을 찾을 수 없습니다. id=" + productId));
 
         product.setStock(stock);
+        // JPA dirty checking 으로 flush 시 UPDATE (명시적 save 불필요).
+
+        return AdminProductDto.ListItem.from(product);
+    }
+
+    /**
+     * 상품 하위 카테고리 변경 (P2 5/28).
+     *
+     * subCategoryId 가 null 이면 하위분류 미지정(연결 해제). 그 외에는 해당
+     * 하위분류를 조회해 연결한다. JPA dirty checking 으로 flush 시 UPDATE.
+     *
+     * 핵심 가드 — product_type 일치 검증:
+     *   하위 카테고리는 product_type 에 종속된다(예: KEYBOARD '풀배열').
+     *   KEYBOARD 상품에 KEYCAP 하위분류를 붙이면 도메인 모순이므로,
+     *   상품의 productType 과 하위분류의 productType 이 다르면 badRequest 로 차단.
+     *
+     * 사용자 측 반영: 공개 API findActiveWithFilters 의 subCategoryId 필터가
+     * 이 값을 읽어 ProductList 측면 필터에 자동 전파된다.
+     *
+     * @param productId     대상 상품 id
+     * @param subCategoryId 연결할 하위분류 id (null = 미지정)
+     */
+    @Transactional
+    public AdminProductDto.ListItem updateSubCategory(Long productId, Long subCategoryId) {
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> BusinessException.notFound(
+                        "상품을 찾을 수 없습니다. id=" + productId));
+
+        if (subCategoryId == null) {
+            product.setSubCategory(null);
+        } else {
+            SubCategory sub = subCategoryRepository.findById(subCategoryId)
+                    .orElseThrow(() -> BusinessException.notFound(
+                            "하위 카테고리를 찾을 수 없습니다. id=" + subCategoryId));
+
+            // product_type 일치 가드 — 상품과 하위분류의 대분류가 같아야 함
+            String productTypeName = product.getProductType() != null
+                    ? product.getProductType().name() : null;
+            if (!sub.getProductType().equals(productTypeName)) {
+                throw BusinessException.badRequest(
+                        "상품의 대분류(" + productTypeName + ")와 하위 카테고리의 대분류("
+                      + sub.getProductType() + ")가 일치하지 않습니다.");
+            }
+            product.setSubCategory(sub);
+        }
         // JPA dirty checking 으로 flush 시 UPDATE (명시적 save 불필요).
 
         return AdminProductDto.ListItem.from(product);

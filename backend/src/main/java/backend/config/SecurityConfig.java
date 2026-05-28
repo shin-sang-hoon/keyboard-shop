@@ -77,6 +77,9 @@ public class SecurityConfig {
                         // General product/category browsing - public
                         .requestMatchers("/api/products", "/api/products/**").permitAll()
                         .requestMatchers("/api/categories", "/api/categories/**").permitAll()
+                        // [P2 · 5/28] Public sub-category lookup (사용자단 측면 필터용).
+                        // 관리자 CRUD 는 /api/admin/sub-categories (아래 /api/admin/** hasRole ADMIN).
+                        .requestMatchers("/api/sub-categories", "/api/sub-categories/**").permitAll()
 
                         // [Phase 7-B] Public notices - list / detail / view-counter
                         // all open to anonymous visitors (POST /{id}/view included).
