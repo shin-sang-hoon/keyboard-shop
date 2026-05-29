@@ -3,6 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import ReviewList from './ReviewList';
 import QnAList from './QnAList';
 import RefundPolicy from './RefundPolicy';
+// P3 (5/29) — 상세정보 HTML 렌더: XSS sanitize + dev/prod URL 보정
+import DOMPurify from 'dompurify';
+import { prependAssetOrigins } from '../utils/assetUrl';
 
 /**
  * 상품 상세 4-tab 네비게이션 (5-H C1-b + C1-c + C3 + C7).
@@ -19,6 +22,25 @@ import RefundPolicy from './RefundPolicy';
  *   - 탭 활성화 시점에만 컨텐츠 컴포넌트 마운트
  *   - 다른 탭 → /reviews · /qna · refund 자원 사용 0
  */
+
+// P3: 상세정보 본문(.swk-detail-content) 스타일 1회 주입 (ProductDetail.jsx 패턴)
+if (typeof document !== 'undefined' && !document.getElementById('swk-detail-content-style')) {
+  const el = document.createElement('style');
+  el.id = 'swk-detail-content-style';
+  el.textContent = `
+    .swk-detail-content { font-size: 15px; line-height: 1.8; color: #27272a; word-break: break-word; }
+    .swk-detail-content > *:first-child { margin-top: 0; }
+    .swk-detail-content h2 { font-size: 24px; font-weight: 800; margin: 28px 0 14px; line-height: 1.3; color: #18181b; }
+    .swk-detail-content h3 { font-size: 19px; font-weight: 700; margin: 24px 0 12px; line-height: 1.35; color: #18181b; }
+    .swk-detail-content p { margin: 0 0 14px; }
+    .swk-detail-content ul, .swk-detail-content ol { margin: 0 0 14px; padding-left: 24px; }
+    .swk-detail-content li { margin: 6px 0; }
+    .swk-detail-content img { max-width: 100%; height: auto; border-radius: 10px; margin: 12px 0; display: block; }
+    .swk-detail-content strong { font-weight: 700; }
+    .swk-detail-content a { color: #3b6bef; text-decoration: underline; }
+  `;
+  document.head.appendChild(el);
+}
 
 const TABS = [
   { key: 'detail',  label: '상세정보',   getCount: () => null },
@@ -146,18 +168,36 @@ export default function ProductTabs({
 // ═════════════════════════════════════════════════════════════════════
 
 function DetailTab({ product }) {
+  const raw = product?.description;
+  const hasContent =
+    typeof raw === 'string' && raw.trim().length > 0 && raw.trim() !== '<p></p>';
+
+  // 미등록 — 기존 placeholder 톤 유지
+  if (!hasContent) {
+    return (
+      <div style={S.placeholderBox}>
+        <h2 style={S.tabTitle}>상세정보</h2>
+        <p style={S.placeholderText}>등록된 상세정보가 없습니다.</p>
+        {product?.brandName && (
+          <p style={S.placeholderMeta}>
+            우측 정보 박스에서 기본 정보 (브랜드 / 재고 / 상태) 를 확인하세요.
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // 보안: ADMIN 만 작성하는 신뢰 경계 안의 HTML 이지만, dangerouslySetInnerHTML 는
+  //       stored XSS 정문이므로 렌더 단에서 DOMPurify allowlist sanitization (defense-in-depth).
+  //       sanitize 후 dev/prod origin 보정 (저장은 상대 URL, 표시는 절대 URL).
+  const safeHtml = prependAssetOrigins(DOMPurify.sanitize(raw));
+
   return (
-    <div style={S.placeholderBox}>
-      <h2 style={S.tabTitle}>상세정보</h2>
-      <p style={S.placeholderText}>
-        상품 상세 설명 영역입니다.<br />
-        백엔드에 description 필드 추가 후 본격 컨텐츠가 표시됩니다.
-      </p>
-      {product?.brandName && (
-        <p style={S.placeholderMeta}>
-          현재는 우측 정보 박스에서 기본 정보 (브랜드 / 재고 / 상태) 를 확인하세요.
-        </p>
-      )}
+    <div style={S.detailBox}>
+      <div
+        className="swk-detail-content"
+        dangerouslySetInnerHTML={{ __html: safeHtml }}
+      />
     </div>
   );
 }
@@ -205,6 +245,14 @@ const S = {
 
   panel: {
     padding: '32px 0 48px',
+  },
+
+  detailBox: {
+    background: '#fff',
+    border: '1px solid #e4e4e7',
+    borderRadius: 12,
+    padding: '32px 28px',
+    minHeight: 200,
   },
 
   placeholderBox: {

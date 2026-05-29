@@ -42,6 +42,9 @@ public class ProductService {
     private final ReviewRepository reviewRepository;
     private final QnARepository qnaRepository;
 
+    // P3 (5/29): 상세정보 인라인 이미지 수명주기 (reconcile / 상품 삭제 시 파일 정리)
+    private final ProductDetailImageService productDetailImageService;
+
     /**
      * 상품 목록 조회 — 페이지네이션 + 검색 + productType 필터 + subCategoryId 필터 + status='ACTIVE' 강제.
      *
@@ -53,6 +56,10 @@ public class ProductService {
      *   - subCategoryId 필터 추가 (사용자단 측면 필터 — 하위 카테고리별 상품)
      *   - @Cacheable 캐시 키에 subCategoryId 반영 + products_v3 → products_v4 bump
      *     (키에 안 넣으면 다른 하위카테고리가 같은 캐시 반환하는 버그 — 4/27 stale 사고 패턴)
+     *
+     * P3 (5/29) 노트:
+     *   - description 은 목록 응답에 미포함 (toResponse 에서 set 안 함) → 목록 페이로드에 LONGTEXT 미적재.
+     *     단건 getProduct 에서만 hydrate (detail-only 로딩). 따라서 products_v4 캐시 키/버전 변경 불필요.
      *
      * 5-H B1 enrichment 패턴:
      *   1) Page<Product> 가져오기 (EntityGraph 로 brand/category JOIN FETCH — Step 4)
@@ -97,10 +104,13 @@ public class ProductService {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("상품을 찾을 수 없습니다."));
         List<Product> single = List.of(product);
-        return toResponse(product,
+        ProductDto.Response resp = toResponse(product,
                 fetchImagesGrouped(single),
                 fetchReviewStats(single),
                 fetchQnaCounts(single));
+        // P3: description 은 단건 상세에서만 hydrate (목록 페이로드 제외).
+        resp.setDescription(product.getDescription());
+        return resp;
     }
 
     @Transactional
@@ -159,6 +169,10 @@ public class ProductService {
         product.setGbStatus(request.getGbStatus());
         if (request.getStatus() != null) product.setStatus(request.getStatus());
         if (request.getProductType() != null) product.setProductType(request.getProductType());
+        // 주의: description 은 여기서 의도적으로 다루지 않는다.
+        //   이 경로(PUT /api/products/{id})는 SecurityConfig 에서 permitAll(공개)이므로
+        //   HTML 본문(stored XSS 벡터)을 받으면 무가드 쓰기 구멍이 된다.
+        //   description 쓰기는 가드된 updateDescription(아래) 로만 허용.
 
         Product saved = productRepository.save(product);
         // 기존 상품 — 이미지/리뷰가 있을 수 있어 fetch
@@ -169,9 +183,30 @@ public class ProductService {
                 fetchQnaCounts(single));
     }
 
+    /**
+     * P3 (5/29): 상세정보 HTML 저장 + 인라인 이미지 reconcile.
+     *
+     * 호출 경로: PATCH /api/admin/products/{id}/description (AdminProductDetailController, hasRole ADMIN).
+     *
+     * 캐시 evict 불필요:
+     *   - description 은 목록(products_v4) 응답에 미포함
+     *   - 단건 getProduct 는 @Cacheable 아님 → 저장 즉시 사용자 상세에 반영
+     */
+    @Transactional
+    public void updateDescription(Long id, String html) {
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("상품을 찾을 수 없습니다."));
+        product.setDescription(html);
+        productRepository.save(product);
+        // 저장된 HTML 기준으로 인라인 이미지 정리 (미참조 파일 GC, PENDING→CONFIRMED)
+        productDetailImageService.reconcile(id, html);
+    }
+
     @Transactional
     @CacheEvict(value = "products_v4", allEntries = true)
     public void deleteProduct(Long id) {
+        // P3: 상세 인라인 이미지 디스크 파일 + 추적 row 선정리 (FK ON DELETE CASCADE 는 안전망)
+        productDetailImageService.deleteAllByProduct(id);
         productRepository.deleteById(id);
     }
 
@@ -221,6 +256,8 @@ public class ProductService {
                                            Map<Long, Long> qnaCountMap) {
         Long pid = p.getId();
         ReviewStats stats = reviewStatsMap.getOrDefault(pid, ReviewStats.EMPTY);
+        // 주의: description 은 여기서 set 하지 않는다 (목록 페이로드 제외 — detail-only 로딩).
+        //       단건 getProduct 에서만 resp.setDescription() 으로 hydrate.
         return ProductDto.Response.builder()
                 .id(pid)
                 .name(p.getName())

@@ -25,6 +25,8 @@ import { colors, typography, spacing, radius, shadow } from '../../styles/tokens
 import { adminProductApi, DEFAULT_RESTOCK } from '../../api/adminProduct';
 import { adminBrandApi } from '../../api/adminBrand';
 import { adminSubCategoryApi } from '../../api/adminSubCategory';
+// P3 (5/29) — 상세정보 편집 모달 (TipTap WYSIWYG + 인라인 이미지)
+import ProductDetailEditorModal from '../../components/admin/ProductDetailEditorModal';
 
 const PAGE_SIZE = 20;
 
@@ -92,6 +94,9 @@ export default function AdminProductPage() {
   //   subCatMap = { KEYBOARD: [{id,name,...}], KEYCAP: [...], ... }
   const [subCatMap, setSubCatMap] = useState({});
   const [subCatUpdatingId, setSubCatUpdatingId] = useState(null);
+
+  // [P3] 상세정보 편집 모달 — 열려있는 상품 id (null = 닫힘)
+  const [detailEditId, setDetailEditId] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -458,6 +463,14 @@ export default function AdminProductPage() {
                           : p.stock === 0 ? '판매 재개' : '품절 처리'}
                       </button>
                     )}
+                    {/* [P3] 상세정보 편집 — 상태 무관 항상 노출 */}
+                    <button
+                      type="button"
+                      onClick={() => setDetailEditId(p.id)}
+                      style={{ ...S.toggleBtn, ...S.detailBtn }}
+                    >
+                      상세정보
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -489,6 +502,14 @@ export default function AdminProductPage() {
             다음 →
           </button>
         </div>
+      )}
+
+      {/* [P3] 상세정보 편집 모달 */}
+      {detailEditId != null && (
+        <ProductDetailEditorModal
+          productId={detailEditId}
+          onClose={() => setDetailEditId(null)}
+        />
       )}
     </div>
   );
@@ -740,6 +761,10 @@ const S = {
   restockBtn: {
     color: '#047857',
     borderColor: '#a7f3d0',
+  },
+  detailBtn: {
+    color: '#3b6bef',
+    borderColor: '#bfdbfe',
   },
   pager: {
     display: 'flex',

@@ -98,6 +98,39 @@ export const adminProductApi = {
     const res = await apiClient.patch(`/admin/products/${id}/sub-category`, { subCategoryId });
     return res.data;
   },
+
+  /**
+   * POST /api/admin/products/{id}/detail-images  (P3 5/29 — 상세정보 인라인 이미지)
+   *
+   * 상세정보 에디터에서 이미지 1장 업로드. 디스크 저장 + PENDING 추적 후 URL 반환.
+   * 저장(updateDescription) 시 백엔드가 HTML 참조 기준으로 reconcile (미참조 GC).
+   *
+   * @param {number} id   - 대상 상품 id
+   * @param {File}   file - 업로드할 이미지 (png/jpg/gif/webp)
+   * @returns {{ url: string }} - 에디터가 <img src> 로 임베드할 상대 URL (/uploads/products/...)
+   */
+  uploadDetailImage: async (id, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await apiClient.post(`/admin/products/${id}/detail-images`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res.data;
+  },
+
+  /**
+   * PATCH /api/admin/products/{id}/description  (P3 5/29)
+   *
+   * 상품 상세정보(HTML) 저장. 저장된 HTML 기준으로 인라인 이미지 reconcile 트리거.
+   * description 은 사용자 단건 상세(GET /api/products/{id})에서만 hydrate (목록 제외).
+   *
+   * @param {number} id          - 대상 상품 id
+   * @param {string} description - 상세정보 HTML (상대 URL canonical)
+   */
+  updateDescription: async (id, description) => {
+    const res = await apiClient.patch(`/admin/products/${id}/description`, { description });
+    return res.data;
+  },
 };
 
 export default adminProductApi;

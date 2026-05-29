@@ -36,6 +36,12 @@ public class Product {
     @Column(nullable = false)
     private String name;
 
+    // P3 (5/29): 상세정보 HTML 본문 (WYSIWYG 작성, DOMPurify 후 렌더).
+    //   - LONGTEXT 매핑 — columnDefinition 명시 필수 (미명시 시 Hibernate 가 varchar(255) 기대 → validate 실패).
+    //   - 단건 상세 응답에서만 hydrate (목록 페이로드 제외 — detail-only 로딩).
+    @Column(columnDefinition = "LONGTEXT")
+    private String description;
+
     private String imageUrl;
 
     private Integer price;
