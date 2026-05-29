@@ -3,6 +3,7 @@ package backend.controller;
 import backend.dto.AuthRequest;
 import backend.dto.AuthResponse;
 import backend.dto.RefreshRequest;
+import backend.dto.WithdrawRequest;
 import backend.exception.BusinessException;
 import backend.service.AuthService;
 import backend.service.KakaoOAuthClient;
@@ -25,9 +26,11 @@ import java.nio.charset.StandardCharsets;
  *
  * 5-B Day 1 (5/8): /signup, /login, /refresh, /me
  * 5-B Day 2 (5/9): /kakao/authorize-url, /kakao/callback
+ * 회원 탈퇴 (5/29): /withdraw
  *
  * SecurityConfig:
  *   /api/auth/me        → authenticated()
+ *   /api/auth/withdraw  → authenticated()
  *   /api/auth/**        → permitAll()  (kakao 2개도 자동 매칭)
  */
 @Slf4j
@@ -81,33 +84,48 @@ public class AuthController {
      */
     @GetMapping("/me")
     public ResponseEntity<AuthResponse> me() {
+        String email = currentEmail();
+        return ResponseEntity.ok(authService.loadByEmail(email));
+    }
+
+    /**
+     * 회원 탈퇴 (soft delete, 5/29).
+     *
+     * POST /api/auth/withdraw
+     * Body: { "password": "...", "reason": "..." }  (KAKAO 는 password 생략 가능)
+     *
+     * 본인 토큰(SecurityContext)에서 email 추출 — 요청 바디의 email 을 신뢰하지 않음
+     * (타인 계정 탈퇴 방지). SecurityConfig 에서 authenticated() 가드.
+     *
+     * 처리 후 200 OK. 토큰은 stateless 라 서버 폐기 없음 → 프론트가 토큰 버리고
+     * 로그아웃 + 홈 이동. (Redis 블랙리스트는 Phase 8)
+     */
+    @PostMapping("/withdraw")
+    public ResponseEntity<Void> withdraw(@RequestBody(required = false) WithdrawRequest request) {
+        String email = currentEmail();
+        authService.withdraw(email, request);
+        log.info("Withdraw processed: email={}", email);
+        return ResponseEntity.ok().build();
+    }
+
+    /**
+     * SecurityContext 에서 인증된 사용자 email 추출.
+     * /me 와 /withdraw 공용 — 미인증이면 401.
+     */
+    private String currentEmail() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null
                 || !auth.isAuthenticated()
                 || !(auth.getPrincipal() instanceof UserDetails)) {
             throw BusinessException.unauthorized("Not authenticated");
         }
-        String email = ((UserDetails) auth.getPrincipal()).getUsername();
-        return ResponseEntity.ok(authService.loadByEmail(email));
+        return ((UserDetails) auth.getPrincipal()).getUsername();
     }
 
     // ========================================================================
     // 5-B Day 2: Kakao OAuth
     // ========================================================================
 
-    /**
-     * GET /api/auth/kakao/authorize-url?state={state}
-     *
-     * 프론트가 카카오 로그인 버튼 누르면 호출:
-     *   1) 프론트에서 random nonce 생성 → sessionStorage 저장
-     *   2) 이 엔드포인트로 state 전달, 인가 URL 받음
-     *   3) window.location.href = 응답 URL
-     *
-     * 굳이 백엔드를 거치는 이유:
-     *   - client_id / redirect_uri 같은 OAuth 설정을 프론트가 알 필요 없게.
-     *   - 환경 분기 (Mac 8080 / 학원 8081) 가 백엔드 properties 만으로 가능.
-     *   - 향후 multi-provider (Google/Naver) 추가 시 같은 패턴 재활용.
-     */
     /**
      * POST /api/auth/logout
      *
@@ -144,17 +162,6 @@ public class AuthController {
      *
      * 카카오가 redirect_uri 로 돌려보내는 콜백 엔드포인트.
      * 처리 후 프론트의 /auth/kakao/success 페이지로 토큰을 쿼리스트링에 담아 redirect.
-     *
-     * 왜 JSON 응답이 아닌 redirect 인가:
-     *   - 카카오 OAuth 는 브라우저 navigation 기반. 콜백도 브라우저가 직접 받음.
-     *   - JSON 으로 응답하면 브라우저에 raw JSON 노출됨.
-     *   - 따라서 백엔드는 토큰을 쿼리스트링으로 붙여 프론트 페이지로 302 redirect,
-     *     프론트 페이지가 useEffect 로 토큰 추출 → 저장 → 메인으로 이동.
-     *
-     * 보안 고려 (Phase 8 todo):
-     *   - 토큰을 URL 에 노출하는 건 브라우저 history 에 남는 단점.
-     *   - 운영 환경에서는 짧은 수명의 "exchange code" 발급 → 프론트가 그 코드로
-     *     POST /api/auth/exchange 호출하여 토큰 교환하는 패턴 권장.
      */
     @GetMapping("/kakao/callback")
     public void kakaoCallback(
@@ -197,7 +204,7 @@ public class AuthController {
                     + (state != null ? "&state=" + enc(state) : "");
             response.sendRedirect(redirect);
         } catch (BusinessException ex) {
-            // 이메일 충돌 (이미 LOCAL 가입된 이메일) 등 비즈니스 에러
+            // 이메일 충돌 (이미 LOCAL 가입된 이메일) / 탈퇴 계정 등 비즈니스 에러
             log.warn("Kakao login business error: {}", ex.getMessage());
             String redirect = frontendRedirect
                     + "?error=login_failed"

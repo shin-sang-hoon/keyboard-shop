@@ -116,6 +116,21 @@ export function useAuth() {
     return data;
   }
 
+  /**
+   * 회원 탈퇴 (soft delete).
+   *
+   * 백엔드 가드: LOCAL 은 password 재인증 / KAKAO 는 password 무시.
+   * 성공 시(200) 서버는 토큰을 추적하지 않으므로(stateless) 프론트가 즉시
+   * store 를 비워 로그아웃 처리 — logout() 과 동일하게 storeLogout() 호출.
+   *
+   * 실패(400/401/403/409)는 throw 되어 호출부(모달)가 메시지 표시.
+   * 성공 시에만 토큰 폐기되도록 await 후 storeLogout (실패 시 세션 유지).
+   */
+  async function withdraw({ password, reason } = {}) {
+    await authApi.withdraw({ password, reason });
+    storeLogout(); // 성공 시에만 도달 — 토큰/user 비움
+  }
+
   return {
     user,
     isAuthenticated,
@@ -124,6 +139,7 @@ export function useAuth() {
     setSession,
     logout,
     refreshUser,
+    withdraw,
   };
 }
 

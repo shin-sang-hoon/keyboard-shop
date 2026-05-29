@@ -46,10 +46,18 @@ export default function LoginPage() {
       await login(email.trim(), password);
       navigate(redirectTo, { replace: true });
     } catch (err) {
-      const msg =
-        err?.response?.data?.message ||
-        err?.message ||
-        '로그인 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.';
+      // status 별 한국어 매핑 (백엔드 메시지는 영어 — 프론트에서 변환).
+      //  - 401: 인증 실패 (이메일/비번 불일치). enumeration 방지 위해 사유 합침.
+      //  - 403: 자격증명은 맞으나 계정 상태로 거부 (탈퇴 계정).
+      const status = err?.response?.status;
+      let msg;
+      if (status === 401) {
+        msg = '이메일 또는 비밀번호가 일치하지 않습니다.';
+      } else if (status === 403) {
+        msg = '이 계정은 이미 탈퇴한 계정입니다.';
+      } else {
+        msg = '로그인 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.';
+      }
       setError(msg);
     } finally {
       setSubmitting(false);

@@ -64,8 +64,10 @@ public class SecurityConfig {
                         .accessDeniedHandler(accessDeniedHandler))
 
                 .authorizeHttpRequests(auth -> auth
-                        // Auth - /me requires token, others are entry points
+                        // Auth - /me, /withdraw require token, others are entry points.
+                        // 구체적 경로가 /api/auth/** permitAll 보다 위에 와야 매칭됨 (first-match).
                         .requestMatchers("/api/auth/me").authenticated()
+                        .requestMatchers("/api/auth/withdraw").authenticated()
                         .requestMatchers("/api/auth/**").permitAll()
 
                         // Product like (5-H B4) - count public, toggle authenticated

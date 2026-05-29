@@ -43,6 +43,14 @@ export const authApi = {
     const res = await apiClient.get('/auth/me');
     return res.data;
   },
+
+  // POST /api/auth/withdraw - 회원 탈퇴 (soft delete)
+  // body: { password, reason }  (KAKAO 는 password 생략 가능)
+  // 본인 토큰으로만 동작 (SecurityContext email). 200 OK 후 프론트가 토큰 폐기.
+  withdraw: async ({ password, reason } = {}) => {
+    const res = await apiClient.post('/auth/withdraw', { password, reason });
+    return res.data;
+  },
 };
 
 export default authApi;
