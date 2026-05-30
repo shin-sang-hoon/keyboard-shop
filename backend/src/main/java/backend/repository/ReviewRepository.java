@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Review 영속성 레포지토리 (5-H A2 + A6 + B1 batch + B5 stats, 7-G R8 hidden 필터).
+ * Review 영속성 레포지토리 (5-H A2 + A6 + B1 batch + B5 stats, 7-G R8 hidden 필터, R10 답글).
  *
  * 메서드 구성:
  *  - 공개 조회: findByProductId(페이징), findByUserId(마이페이지)
@@ -20,6 +20,7 @@ import java.util.Optional;
  *  - B1 batch: findReviewStatsByProductIds
  *  - B5 stats: findRatingDistributionByProductId
  *  - 7-G R8: findForAdmin(관리자 목록), countByHiddenTrue(숨김 카운트)
+ *  - R10: findRepliedByAdmin(관리자가 답변한 리뷰 — 마이페이지 관리자 탭)
  *
  * ── 7-G R8 hidden 정책 ──────────────────────────────────────────────
  *  관리자가 숨긴 리뷰(hidden=true)는 "공개"로 노출되는 모든 경로에서 제외돼야 함.
@@ -42,8 +43,15 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
     /**
      * 상품 페이지 — 공개 리뷰만 (hidden=false). 정렬은 Pageable 위임.
      * 파생 메서드명을 유지하되 @Query 로 hidden 필터를 적용 (호출부 무수정).
+     *
+     * R10: repliedBy 를 LEFT JOIN FETCH — 답글 있는 리뷰의 "판매자 답변" 노출 시
+     *      답변자 displayName 접근으로 발생하는 N+1 을 선제 차단.
+     *      LEFT 인 이유: 미답변 리뷰(repliedBy=null)도 결과에 포함돼야 하므로.
+     *      user 는 from() 에서 항상 접근하므로 함께 fetch (product 는 product.id 만 써서 생략).
      */
     @Query(value = "SELECT r FROM Review r " +
+                   "JOIN FETCH r.user " +
+                   "LEFT JOIN FETCH r.repliedBy " +
                    "WHERE r.product.id = :productId AND r.hidden = false",
            countQuery = "SELECT COUNT(r) FROM Review r " +
                    "WHERE r.product.id = :productId AND r.hidden = false")
@@ -105,4 +113,23 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
 
     /** 관리자 헤더 통계용 — 현재 숨김 처리된 리뷰 수 */
     long countByHiddenTrue();
+
+    // ─────────────────────────────────────────────────────
+    // R10: 판매자 답글 — 관리자가 답변한 리뷰 (마이페이지 관리자 탭)
+    // ─────────────────────────────────────────────────────
+
+    /**
+     * 마이페이지 "내가 답변한 리뷰" — 특정 관리자(repliedBy)가 답변한 리뷰 목록.
+     *
+     * user/product 를 JOIN FETCH — DTO 변환 시 N+1 회피 (단방향 ManyToOne 2개 → 페이징 안전).
+     * repliedBy 는 WHERE 조건이므로 fetch 불필요 (현재 로그인 관리자 == 답변자, 이미 알고 있음).
+     * 정렬: 답변 최신순 (replied_at DESC) — idx_review_replied_by(replied_by, replied_at) 활용.
+     */
+    @Query(value = "SELECT r FROM Review r " +
+                   "JOIN FETCH r.user JOIN FETCH r.product " +
+                   "WHERE r.repliedBy.id = :adminId " +
+                   "ORDER BY r.repliedAt DESC",
+           countQuery = "SELECT COUNT(r) FROM Review r " +
+                   "WHERE r.repliedBy.id = :adminId")
+    Page<Review> findRepliedByAdmin(@Param("adminId") Long adminId, Pageable pageable);
 }

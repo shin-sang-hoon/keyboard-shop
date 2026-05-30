@@ -6,10 +6,11 @@ import backend.entity.ReviewReport;
 import java.time.LocalDateTime;
 
 /**
- * 관리자 리뷰·신고 운영 DTO (7-G R8).
+ * 관리자 리뷰·신고 운영 DTO (7-G R8, R10 답글).
  *
- *  - ListItem          : 리뷰 목록 한 행 (숨김 포함)
+ *  - ListItem          : 리뷰 목록 한 행 (숨김 포함 + R10 답글 정보)
  *  - VisibilityRequest : 숨김/복원 요청 바디
+ *  - ReplyRequest      : 답글 작성·수정 요청 바디 (R10)
  *  - ReportItem        : 신고 큐 한 행 (신고 정보 + 신고된 리뷰 정보)
  *
  * 사용자 측 신고 등록 DTO 는 ReviewReportDto 에 별도 정의.
@@ -22,6 +23,12 @@ public class AdminReviewDto {
     /**
      * 관리자 리뷰 목록 항목.
      * 공개 페이지와 달리 hidden 리뷰도 포함하며 hidden 플래그를 그대로 노출.
+     *
+     * R10 — 답글 정보 추가:
+     *   - reply          : 답글 본문 (null = 미답변)
+     *   - repliedByName  : 답변 관리자 displayName (null = 미답변 or 계정삭제)
+     *   - repliedAt      : 답변 시각 (null = 미답변)
+     *   AdminReviewQnaPage 의 답글 작성/수정 UI, 마이페이지 "내가 답변한 리뷰" 탭이 함께 사용.
      */
     public record ListItem(
             Long id,
@@ -31,6 +38,10 @@ public class AdminReviewDto {
             Double rating,
             String content,
             boolean hidden,
+            // ── R10 답글 ──
+            String reply,
+            String repliedByName,
+            LocalDateTime repliedAt,
             LocalDateTime createdAt
     ) {
         public static ListItem from(Review r) {
@@ -42,6 +53,9 @@ public class AdminReviewDto {
                     r.getRating(),
                     r.getContent(),
                     Boolean.TRUE.equals(r.getHidden()),
+                    r.getReply(),
+                    r.getRepliedBy() != null ? r.getRepliedBy().displayName() : null,
+                    r.getRepliedAt(),
                     r.getCreatedAt()
             );
         }
@@ -49,6 +63,13 @@ public class AdminReviewDto {
 
     /** 리뷰 숨김/복원 요청 — PATCH /api/admin/reviews/{id}/visibility 바디 */
     public record VisibilityRequest(Boolean hidden) {
+    }
+
+    /**
+     * 리뷰 답글 작성·수정 요청 — PATCH /api/admin/reviews/{id}/reply 바디 (R10).
+     * content 는 Service 에서 공백 검증 (빈 답글 거부).
+     */
+    public record ReplyRequest(String content) {
     }
 
     /**

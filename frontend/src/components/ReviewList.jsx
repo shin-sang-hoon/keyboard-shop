@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import RatingDistributionChart from './RatingDistributionChart';
 import ReviewReportModal from './ReviewReportModal';
 import { useAuthStore } from '../stores/authStore';
+import { adminReviewApi } from '../api/adminReview';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
 
 /**
- * 상품 리뷰 리스트 (5-H C1-c + C2 + B6).
+ * 상품 리뷰 리스트 (5-H C1-c + C2 + B6, R10 판매자 답변 노출 + 관리자 인라인 답글).
  *
  * C2 변경:
  *   - props 에 onRequestWrite, refetchKey 추가 (C3 패턴 그대로)
@@ -24,6 +25,16 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api
  * P0.5 변경 (7-G R8 사용자 측 연동):
  *   - ReviewCard 에 신고 버튼 추가 → ReviewReportModal 띄움
  *   - 백엔드 POST /api/reviews/{reviewId}/report (ReviewReportController) 와 연결
+ *
+ * R10 변경 (판매자 답변 노출 + 관리자 인라인 답글):
+ *   - 공개: review.reply 가 있으면 content 아래 "판매자 답변" 블록 노출 (모두에게)
+ *   - 관리자 전용 인라인 운영 UI — Header 와 동일하게 user?.role === 'ADMIN' 분기:
+ *       · 답글 없는 리뷰 → "+ 판매자 답변 달기" 버튼
+ *       · 답글 있는 리뷰 → 답변 블록에 "수정 / 삭제" 버튼
+ *       · 클릭 시 카드 내 인라인 textarea (모달 없이 가볍게) → PATCH/DELETE /api/admin/reviews/{id}/reply
+ *   - 일반 사용자 / 비로그인 → 기존과 동일하게 읽기만 (운영 UI 없음)
+ *   - 답글 저장/삭제 후 내부 트리거(internalRefetch)로 목록 갱신 → 공개 노출 즉시 반영
+ *   - 권한: /api/admin/** 는 백엔드 hasRole("ADMIN") 가드 → 비관리자가 호출해도 403 (UI+서버 2중 방어)
  *
  * 구성 (위 → 아래):
  *   [1] 헤더 — 정렬 dropdown (B6 활성화) + 작성 버튼
@@ -45,6 +56,14 @@ export default function ReviewList({ productId, onRequestWrite, refetchKey = 0 }
 
   // B6: 백엔드 ReviewSort enum 값과 매칭 (helpful 은 보류 — disabled)
   const [sort, setSort] = useState('LATEST');
+
+  // R10: 답글 작성/수정/삭제 후 목록을 다시 불러오기 위한 내부 트리거
+  // (부모가 주는 refetchKey 와 별개 — 관리자 운영 행위로 인한 갱신 전용)
+  const [internalRefetch, setInternalRefetch] = useState(0);
+
+  // R10: 관리자 여부 — Header.jsx 와 동일 패턴
+  const user = useAuthStore((s) => s.user);
+  const isAdmin = user?.role === 'ADMIN';
 
   const isMountedRef = useRef(true);
 
@@ -97,7 +116,10 @@ export default function ReviewList({ productId, onRequestWrite, refetchKey = 0 }
       });
 
     return () => controller.abort();
-  }, [productId, page, sort, refetchKey]);
+  }, [productId, page, sort, refetchKey, internalRefetch]);
+
+  // R10: 답글 작성/수정/삭제 후 목록 갱신
+  const handleReplyChanged = () => setInternalRefetch((k) => k + 1);
 
   return (
     <div style={S.container}>
@@ -182,7 +204,12 @@ export default function ReviewList({ productId, onRequestWrite, refetchKey = 0 }
           <>
             <div style={S.cardList}>
               {reviews.map((review) => (
-                <ReviewCard key={review.id} review={review} />
+                <ReviewCard
+                  key={review.id}
+                  review={review}
+                  isAdmin={isAdmin}
+                  onReplyChanged={handleReplyChanged}
+                />
               ))}
             </div>
 
@@ -224,7 +251,7 @@ export default function ReviewList({ productId, onRequestWrite, refetchKey = 0 }
 // 리뷰 카드 (개별 리뷰 한 건)
 // ═════════════════════════════════════════════════════════════════════
 
-function ReviewCard({ review }) {
+function ReviewCard({ review, isAdmin = false, onReplyChanged }) {
   const {
     id,
     rating,
@@ -232,9 +259,19 @@ function ReviewCard({ review }) {
     userName = '익명',
     createdAt,
     verifiedPurchase = true,
+    // R10 판매자 답변
+    reply,
+    repliedByName,
+    repliedAt,
   } = review;
 
   const [reportOpen, setReportOpen] = useState(false);
+
+  // R10 관리자 인라인 답글 편집 상태
+  const hasReply = reply && reply.trim().length > 0;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(reply || '');
+  const [busy, setBusy] = useState(false);
 
   // 신고 버튼 클릭 — 비로그인 시 모달을 열지 않고 안내 (P0.5)
   const handleReportClick = () => {
@@ -244,6 +281,45 @@ function ReviewCard({ review }) {
       return;
     }
     setReportOpen(true);
+  };
+
+  // R10: 답글 편집 시작 (작성 or 수정)
+  const startEdit = () => {
+    setDraft(reply || '');
+    setEditing(true);
+  };
+
+  // R10: 답글 저장 (작성·수정 공용 — upsert)
+  const saveReply = async () => {
+    if (!draft.trim()) {
+      window.alert('답변 내용을 입력해 주세요.');
+      return;
+    }
+    setBusy(true);
+    try {
+      await adminReviewApi.addReply(id, draft.trim());
+      setEditing(false);
+      onReplyChanged && onReplyChanged();
+    } catch {
+      window.alert('답변 저장에 실패했습니다.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // R10: 답글 삭제
+  const deleteReply = async () => {
+    const ok = window.confirm('판매자 답변을 삭제할까요?');
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await adminReviewApi.removeReply(id);
+      onReplyChanged && onReplyChanged();
+    } catch {
+      window.alert('답변 삭제에 실패했습니다.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -263,6 +339,81 @@ function ReviewCard({ review }) {
       </div>
 
       {content && <p style={S.cardContent}>{content}</p>}
+
+      {/* R10: 판매자 답변 — reply 가 있을 때 노출 (모두에게 보임) */}
+      {hasReply && !editing && (
+        <div style={S.sellerReply}>
+          <div style={S.sellerReplyHead}>
+            <span style={S.sellerReplyBadge}>판매자</span>
+            <span style={S.sellerReplyName}>{repliedByName || '판매자'}</span>
+            {repliedAt && (
+              <>
+                <span style={S.dot}>·</span>
+                <span style={S.sellerReplyDate}>{formatRelativeDate(repliedAt)}</span>
+              </>
+            )}
+            {/* 관리자 전용 — 수정/삭제 */}
+            {isAdmin && (
+              <span style={S.sellerReplyAdminActions}>
+                <button type="button" onClick={startEdit} disabled={busy} style={S.replyTextBtn}>
+                  수정
+                </button>
+                <span style={S.dot}>·</span>
+                <button type="button" onClick={deleteReply} disabled={busy} style={S.replyTextBtnDanger}>
+                  삭제
+                </button>
+              </span>
+            )}
+          </div>
+          <p style={S.sellerReplyContent}>{reply}</p>
+        </div>
+      )}
+
+      {/* R10: 관리자 인라인 답글 편집기 (작성/수정 공용) */}
+      {isAdmin && editing && (
+        <div style={S.replyEditor}>
+          <div style={S.replyEditorLabel}>판매자 답변 {hasReply ? '수정' : '작성'}</div>
+          <textarea
+            style={S.replyTextarea}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="고객 리뷰에 대한 판매자 답변을 입력하세요 (최대 1000자)"
+            maxLength={1000}
+            rows={3}
+            autoFocus
+          />
+          <div style={S.replyEditorFooter}>
+            <span style={S.replyCharCount}>{draft.length} / 1000</span>
+            <div style={S.replyEditorBtns}>
+              <button
+                type="button"
+                onClick={() => setEditing(false)}
+                disabled={busy}
+                style={S.replyCancelBtn}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={saveReply}
+                disabled={busy}
+                style={{ ...S.replySaveBtn, ...(busy ? { opacity: 0.55, cursor: 'progress' } : null) }}
+              >
+                {busy ? '저장 중…' : (hasReply ? '수정' : '등록')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* R10: 관리자 — 답글 없을 때 "답변 달기" 버튼 */}
+      {isAdmin && !hasReply && !editing && (
+        <div style={S.adminReplyAddRow}>
+          <button type="button" onClick={startEdit} style={S.adminReplyAddBtn}>
+            + 판매자 답변 달기
+          </button>
+        </div>
+      )}
 
       {/* 신고 버튼 (7-G R8 사용자 측 연동, P0.5) */}
       <div style={S.cardFooter}>
@@ -521,6 +672,157 @@ const S = {
     margin: 0,
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
+  },
+
+  // R10: 판매자 답변 블록 (content 아래 들여쓴 회색 패널)
+  sellerReply: {
+    marginTop: 12,
+    marginLeft: 12,
+    padding: '12px 16px',
+    background: '#f8fafc',
+    border: '1px solid #e4e4e7',
+    borderLeft: '3px solid #18181b',
+    borderRadius: 8,
+  },
+  sellerReplyHead: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+    fontSize: 12,
+    flexWrap: 'wrap',
+  },
+  sellerReplyBadge: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: '#fff',
+    background: '#18181b',
+    borderRadius: 4,
+    padding: '2px 7px',
+  },
+  sellerReplyName: {
+    fontWeight: 600,
+    color: '#3f3f46',
+  },
+  sellerReplyDate: {
+    color: '#a1a1aa',
+  },
+  sellerReplyAdminActions: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    marginLeft: 8,
+  },
+  sellerReplyContent: {
+    fontSize: 13.5,
+    color: '#3f3f46',
+    lineHeight: 1.6,
+    margin: 0,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  },
+
+  // R10: 관리자 답글 텍스트 버튼 (수정/삭제)
+  replyTextBtn: {
+    background: 'transparent',
+    border: 'none',
+    color: '#52525b',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+    padding: 0,
+    fontFamily: 'inherit',
+  },
+  replyTextBtnDanger: {
+    background: 'transparent',
+    border: 'none',
+    color: '#dc2626',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+    padding: 0,
+    fontFamily: 'inherit',
+  },
+
+  // R10: 관리자 "답변 달기" 행
+  adminReplyAddRow: {
+    marginTop: 10,
+    marginLeft: 12,
+  },
+  adminReplyAddBtn: {
+    background: 'transparent',
+    color: '#18181b',
+    border: '1px dashed #d4d4d8',
+    borderRadius: 8,
+    padding: '7px 14px',
+    fontSize: 12.5,
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+
+  // R10: 관리자 인라인 답글 편집기
+  replyEditor: {
+    marginTop: 12,
+    marginLeft: 12,
+    padding: '12px 16px',
+    background: '#f8fafc',
+    border: '1px solid #d4d4d8',
+    borderLeft: '3px solid #18181b',
+    borderRadius: 8,
+  },
+  replyEditorLabel: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: '#18181b',
+    marginBottom: 8,
+  },
+  replyTextarea: {
+    width: '100%',
+    boxSizing: 'border-box',
+    border: '1px solid #d4d4d8',
+    borderRadius: 6,
+    padding: 10,
+    fontSize: 13.5,
+    fontFamily: 'inherit',
+    lineHeight: 1.6,
+    resize: 'vertical',
+  },
+  replyEditorFooter: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  replyCharCount: {
+    fontSize: 11,
+    color: '#a1a1aa',
+  },
+  replyEditorBtns: {
+    display: 'flex',
+    gap: 8,
+  },
+  replyCancelBtn: {
+    background: '#fff',
+    color: '#52525b',
+    border: '1px solid #d4d4d8',
+    borderRadius: 6,
+    padding: '6px 14px',
+    fontSize: 12.5,
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+  replySaveBtn: {
+    background: '#18181b',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 6,
+    padding: '6px 16px',
+    fontSize: 12.5,
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
   },
 
   // P0.5: 신고 버튼 (카드 우하단)

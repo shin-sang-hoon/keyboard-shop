@@ -10,7 +10,7 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 /**
- * 상품 리뷰 엔티티 (5-H A2 + A6 통합, 7-G R8 hidden 추가).
+ * 상품 리뷰 엔티티 (5-H A2 + A6 통합, 7-G R8 hidden 추가, R10 판매자 답글 추가).
  *
  * 설계 결정:
  *  - rating: Double 1.0~5.0 (0.5 단위) — 검증은 Service 레이어
@@ -29,9 +29,19 @@ import java.time.LocalDateTime;
  *  - 삭제(hard delete)가 아닌 soft hide — 신고 이력/통계 추적 보존
  *  - QnA.isSecret 과 동일하게 @Builder.Default 로 신규 row 는 false 기본값
  *
+ * R10 추가 — 판매자(관리자) 답글:
+ *  - 1 Review 당 최대 1 답글 → 별도 테이블 분리 없이 1:1 임베드 (QnA.answer_content 와 동일 철학)
+ *  - reply(본문) / repliedBy(답변 관리자 FK) / repliedAt(시각) 세 값은 항상 함께 set 또는 함께 null
+ *  - repliedBy FK: Q&A.answeredBy 와 대칭 — 답변자 추적 + 공개 노출 시 displayName 재사용
+ *  - 공개 리뷰 조회에서 답글이 있으면 "판매자 답변" 으로 함께 노출 (ReviewDto.Response 가 매핑)
+ *  - hidden 리뷰는 공개에서 제외 → 답글도 자연히 비노출 (별도 처리 불필요)
+ *
  * 도메인 메서드:
  *  - updateContent(rating, content): 본인 리뷰 수정. dirty checking 으로 자동 UPDATE.
  *  - updateHidden(hidden): 관리자 숨김/복원. dirty checking 으로 자동 UPDATE.
+ *  - addReply(content, admin): 관리자 답글 작성·수정 (R10). dirty checking.
+ *  - removeReply(): 관리자 답글 삭제 — 세 필드 모두 null (R10).
+ *  - hasReply(): 답글 존재 여부 (DTO 파생용).
  */
 @Entity
 @Table(
@@ -41,7 +51,8 @@ import java.time.LocalDateTime;
     },
     indexes = {
         @Index(name = "idx_review_product", columnList = "product_id"),
-        @Index(name = "idx_review_user", columnList = "user_id")
+        @Index(name = "idx_review_user", columnList = "user_id"),
+        @Index(name = "idx_review_replied_by", columnList = "replied_by, replied_at")
     }
 )
 @Getter
@@ -74,6 +85,26 @@ public class Review {
     /** nullable — 별점만 남기는 리뷰 허용 */
     @Column(columnDefinition = "TEXT")
     private String content;
+
+    // ─────────────────────────────────────────────────────
+    // R10 — 판매자(관리자) 답글. 세 필드는 항상 함께 채워지거나 함께 null.
+    // ─────────────────────────────────────────────────────
+
+    /** 관리자 답글 본문 — NULL 이면 미답변. V24 로 컬럼 추가 */
+    @Column(columnDefinition = "TEXT")
+    private String reply;
+
+    /**
+     * 답변한 관리자 (Q&A.answeredBy 와 동일 패턴).
+     * 관리자 계정 삭제 시 FK ON DELETE SET NULL — 답글 본문은 보존, 답변자 링크만 끊김.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "replied_by")
+    private User repliedBy;
+
+    /** 답변 시각 — NULL 이면 미답변 */
+    @Column(name = "replied_at")
+    private LocalDateTime repliedAt;
 
     /**
      * 7-G R8 — 관리자 숨김 플래그.
@@ -125,5 +156,37 @@ public class Review {
      */
     public void updateHidden(boolean hidden) {
         this.hidden = hidden;
+    }
+
+    /**
+     * 도메인 메서드 — 관리자 답글 작성·수정 (R10).
+     *
+     * 최초 작성과 수정을 같은 메서드로 처리 (upsert 의미):
+     *   - 미답변 → 답글 + 답변자 + 시각 세팅
+     *   - 기존 답변 수정 → 본문 갱신 + 답변자/시각 최신화 (다른 관리자가 수정하면 답변자도 갱신)
+     *
+     * dirty checking 으로 UPDATE 자동 발행 (Service 가 save 재호출 불필요).
+     */
+    public void addReply(String content, User admin) {
+        this.reply = content;
+        this.repliedBy = admin;
+        this.repliedAt = LocalDateTime.now();
+    }
+
+    /**
+     * 도메인 메서드 — 관리자 답글 삭제 (R10).
+     *
+     * 세 필드를 모두 null 로 되돌림 → 다시 "미답변" 상태.
+     * dirty checking 으로 UPDATE 자동 발행.
+     */
+    public void removeReply() {
+        this.reply = null;
+        this.repliedBy = null;
+        this.repliedAt = null;
+    }
+
+    /** 답글 존재 여부 — DTO 파생용 (reply 본문 기준) */
+    public boolean hasReply() {
+        return this.reply != null && !this.reply.isBlank();
     }
 }

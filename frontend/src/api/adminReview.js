@@ -1,6 +1,6 @@
 // frontend/src/api/adminReview.js
 //
-// 관리자 리뷰·신고 운영 API (7-G R8).
+// 관리자 리뷰·신고 운영 API (7-G R8, R10 답글).
 // 백엔드: AdminReviewController (/api/admin/reviews, /api/admin/reports)
 //
 // apiClient 의 baseURL 에 /api 가 포함돼 있으므로 여기서는 /admin/... 부터 시작.
@@ -29,6 +29,26 @@ export const adminReviewApi = {
   /** 리뷰 숨김/복원 — hidden: boolean */
   updateVisibility: async (id, hidden) => {
     const res = await apiClient.patch(`/admin/reviews/${id}/visibility`, { hidden });
+    return res.data;
+  },
+
+  // ─── R10 답글 (판매자 답변) ──────────────────────────
+
+  /** 답글 작성·수정 (upsert) — content: string. 답변자는 현재 로그인 관리자 */
+  addReply: async (id, content) => {
+    const res = await apiClient.patch(`/admin/reviews/${id}/reply`, { content });
+    return res.data;
+  },
+
+  /** 답글 삭제 — 미답변 상태로 복귀 */
+  removeReply: async (id) => {
+    const res = await apiClient.delete(`/admin/reviews/${id}/reply`);
+    return res.data;
+  },
+
+  /** 내가 답변한 리뷰 목록 (마이페이지 관리자 탭) — params: { page, size } */
+  getMyReplies: async (params = {}) => {
+    const res = await apiClient.get('/admin/reviews/my-replies', { params: clean(params) });
     return res.data;
   },
 

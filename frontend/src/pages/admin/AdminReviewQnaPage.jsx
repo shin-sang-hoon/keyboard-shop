@@ -1,9 +1,9 @@
 // frontend/src/pages/admin/AdminReviewQnaPage.jsx
 //
-// Phase 7-G R8 (2026-05-26) — 리뷰·Q&A 운영 페이지.
+// Phase 7-G R8 (2026-05-26) — 리뷰·Q&A 운영 페이지. R10 (2026-05-30) 리뷰 답글 추가.
 //
 // 3개 탭 (페이지 내부 상태로 전환, 라우트는 /admin/reviews 하나):
-//   1) 리뷰    — 전체 리뷰 목록 + 숨김/복원 토글 (숨김 시 공개 페이지·별점 통계에서 제외)
+//   1) 리뷰    — 전체 리뷰 목록 + 숨김/복원 토글 + R10 판매자 답글 작성/수정/삭제
 //   2) 신고 큐 — 사용자 신고 처리 (인용=리뷰 숨김 / 기각)
 //   3) Q&A     — 미답변 큐 + 개별 답변 + 미답변 다건 일괄 답변
 //
@@ -118,7 +118,7 @@ function Stars({ rating }) {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// 1) 리뷰 탭
+// 1) 리뷰 탭 — 숨김/복원 + R10 답글 작성/수정/삭제
 // ────────────────────────────────────────────────────────────────────
 function ReviewsTab() {
   const [data, setData] = useState(null);
@@ -127,6 +127,8 @@ function ReviewsTab() {
   const [filter, setFilter] = useState('');
   const [page, setPage] = useState(0);
   const [busyId, setBusyId] = useState(null);
+  const [replyModal, setReplyModal] = useState(null); // { review }
+  const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -166,6 +168,35 @@ function ReviewsTab() {
     }
   };
 
+  // R10: 답글 작성·수정 제출
+  const submitReply = async (text) => {
+    setSubmitting(true);
+    try {
+      await adminReviewApi.addReply(replyModal.review.id, text);
+      setReplyModal(null);
+      await load();
+    } catch {
+      window.alert('답글 저장에 실패했습니다.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // R10: 답글 삭제
+  const deleteReply = async (review) => {
+    const ok = window.confirm('이 리뷰의 판매자 답변을 삭제할까요?');
+    if (!ok) return;
+    setBusyId(review.id);
+    try {
+      await adminReviewApi.removeReply(review.id);
+      await load();
+    } catch {
+      window.alert('답글 삭제에 실패했습니다.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <div>
       <FilterBar options={REVIEW_FILTERS} value={filter} onChange={changeFilter} />
@@ -184,43 +215,82 @@ function ReviewsTab() {
                 <th style={S.th}>상품</th>
                 <th style={S.th}>작성자</th>
                 <th style={{ ...S.th, width: 90 }}>별점</th>
-                <th style={S.th}>내용</th>
+                <th style={S.th}>내용 / 판매자 답변</th>
                 <th style={{ ...S.th, width: 130 }}>작성일</th>
                 <th style={{ ...S.th, width: 90 }}>상태</th>
-                <th style={{ ...S.th, width: 100 }}>처리</th>
+                <th style={{ ...S.th, width: 170 }}>처리</th>
               </tr>
             </thead>
             <tbody>
-              {data.content.map((r) => (
-                <tr key={r.id} style={r.hidden ? S.rowHidden : null}>
-                  <td style={S.td}>{r.productName}</td>
-                  <td style={S.td}>{r.userName}</td>
-                  <td style={S.td}><Stars rating={r.rating} /></td>
-                  <td style={S.td}>
-                    <div style={S.clamp2}>{r.content || <em style={S.muted}>(별점만)</em>}</div>
-                  </td>
-                  <td style={{ ...S.td, ...S.tdDim }}>{fmtDate(r.createdAt)}</td>
-                  <td style={S.td}>
-                    <span style={r.hidden ? S.badgeHidden : S.badgeVisible}>
-                      {r.hidden ? '숨김' : '노출'}
-                    </span>
-                  </td>
-                  <td style={S.td}>
-                    <button
-                      type="button"
-                      disabled={busyId === r.id}
-                      onClick={() => toggleHidden(r)}
-                      style={{
-                        ...S.actionBtn,
-                        ...(r.hidden ? S.actionBtnNeutral : S.actionBtnDanger),
-                        ...(busyId === r.id ? S.actionBtnBusy : null),
-                      }}
-                    >
-                      {r.hidden ? '복원' : '숨김'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {data.content.map((r) => {
+                const hasReply = r.reply && r.reply.trim().length > 0;
+                return (
+                  <tr key={r.id} style={r.hidden ? S.rowHidden : null}>
+                    <td style={S.td}>{r.productName}</td>
+                    <td style={S.td}>{r.userName}</td>
+                    <td style={S.td}><Stars rating={r.rating} /></td>
+                    <td style={S.td}>
+                      <div style={S.clamp2}>{r.content || <em style={S.muted}>(별점만)</em>}</div>
+                      {hasReply && (
+                        <div style={S.replyPreview}>
+                          <span style={S.replyLabel}>판매자 답변</span>
+                          <span style={S.clamp2}>{r.reply}</span>
+                          {r.repliedByName && (
+                            <span style={S.replyMeta}>
+                              — {r.repliedByName} · {fmtDate(r.repliedAt)}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ ...S.td, ...S.tdDim }}>{fmtDate(r.createdAt)}</td>
+                    <td style={S.td}>
+                      <span style={r.hidden ? S.badgeHidden : S.badgeVisible}>
+                        {r.hidden ? '숨김' : '노출'}
+                      </span>
+                    </td>
+                    <td style={S.td}>
+                      <div style={S.actionCol}>
+                        <button
+                          type="button"
+                          onClick={() => setReplyModal({ review: r })}
+                          style={{
+                            ...S.actionBtn,
+                            ...(hasReply ? S.actionBtnNeutral : S.actionBtnPrimary),
+                          }}
+                        >
+                          {hasReply ? '답글 수정' : '답글'}
+                        </button>
+                        {hasReply && (
+                          <button
+                            type="button"
+                            disabled={busyId === r.id}
+                            onClick={() => deleteReply(r)}
+                            style={{
+                              ...S.actionBtn, ...S.actionBtnGhost,
+                              ...(busyId === r.id ? S.actionBtnBusy : null),
+                            }}
+                          >
+                            답글삭제
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          disabled={busyId === r.id}
+                          onClick={() => toggleHidden(r)}
+                          style={{
+                            ...S.actionBtn,
+                            ...(r.hidden ? S.actionBtnNeutral : S.actionBtnDanger),
+                            ...(busyId === r.id ? S.actionBtnBusy : null),
+                          }}
+                        >
+                          {r.hidden ? '복원' : '숨김'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -231,6 +301,84 @@ function ReviewsTab() {
         onPrev={() => setPage((p) => Math.max(0, p - 1))}
         onNext={() => setPage((p) => p + 1)}
       />
+
+      {replyModal && (
+        <ReplyModal
+          review={replyModal.review}
+          submitting={submitting}
+          onClose={() => !submitting && setReplyModal(null)}
+          onSubmit={submitReply}
+        />
+      )}
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 답글 모달 (R10) — 리뷰 본문 표시 + 답글 작성/수정
+// ────────────────────────────────────────────────────────────────────
+function ReplyModal({ review, submitting, onClose, onSubmit }) {
+  const isEdit = review.reply && review.reply.trim().length > 0;
+  const [text, setText] = useState(review.reply || '');
+
+  const handleSubmit = () => {
+    if (!text.trim()) {
+      window.alert('답글 내용을 입력해 주세요.');
+      return;
+    }
+    onSubmit(text.trim());
+  };
+
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={S.modal} onClick={(e) => e.stopPropagation()}>
+        <h3 style={S.modalTitle}>{isEdit ? '판매자 답변 수정' : '판매자 답변 작성'}</h3>
+
+        {/* 대상 리뷰 스냅샷 */}
+        <div style={S.modalQuestion}>
+          <div style={S.modalReviewTop}>
+            <Stars rating={review.rating} />
+            <span style={S.tdDim}>{review.userName}</span>
+          </div>
+          <div style={S.modalQuestionText}>
+            {review.content || <em style={S.muted}>(별점만)</em>}
+          </div>
+          <div style={S.tdDim}>{review.productName}</div>
+        </div>
+
+        <textarea
+          style={S.textarea}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="고객 리뷰에 대한 판매자 답변을 입력하세요 (최대 1000자)"
+          maxLength={1000}
+          rows={5}
+          autoFocus
+        />
+        <div style={S.charCount}>{text.length} / 1000</div>
+
+        <div style={S.modalActions}>
+          <button
+            type="button"
+            style={{ ...S.actionBtn, ...S.actionBtnNeutral }}
+            onClick={onClose}
+            disabled={submitting}
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            style={{
+              ...S.actionBtn, ...S.actionBtnPrimary,
+              ...(submitting ? S.actionBtnBusy : null),
+            }}
+            onClick={handleSubmit}
+            disabled={submitting}
+          >
+            {submitting ? '저장 중…' : (isEdit ? '답변 수정' : '답변 등록')}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -781,6 +929,7 @@ const S = {
     maxWidth: 360,
   },
   stars: { whiteSpace: 'nowrap', fontWeight: typography.fontWeight.semibold },
+  actionCol: { display: 'flex', flexDirection: 'column', gap: spacing[1], alignItems: 'flex-start' },
 
   // ─── 배지 ───
   badgeVisible: {
@@ -834,6 +983,10 @@ const S = {
   actionBtnDanger: { background: colors.danger, color: '#fff' },
   actionBtnNeutral: {
     background: colors.white, color: colors.textOnLightDim,
+    borderColor: colors.borderLight,
+  },
+  actionBtnGhost: {
+    background: 'transparent', color: colors.danger,
     borderColor: colors.borderLight,
   },
   actionBtnBusy: { opacity: 0.55, cursor: 'progress' },
@@ -904,6 +1057,26 @@ const S = {
   answerLabel: {
     display: 'inline-block', marginRight: 6,
     color: colors.accent, fontWeight: typography.fontWeight.bold,
+  },
+
+  // ─── R10 리뷰 답글 미리보기 (리뷰 탭 테이블 셀 내부) ───
+  replyPreview: {
+    marginTop: 6, paddingLeft: spacing[3],
+    borderLeft: `2px solid ${colors.textOnLight}`,
+    fontSize: typography.fontSize.sm, color: colors.textOnLightDim,
+  },
+  replyLabel: {
+    display: 'inline-block', marginRight: 6,
+    color: colors.textOnLight, fontWeight: typography.fontWeight.bold,
+  },
+  replyMeta: {
+    display: 'block', marginTop: 2,
+    color: colors.textOnLightDim, fontSize: typography.fontSize.xs,
+  },
+
+  // ─── 모달 리뷰 스냅샷 (답글 모달용) ───
+  modalReviewTop: {
+    display: 'flex', alignItems: 'center', gap: spacing[2], marginBottom: 6,
   },
 
   // ─── 일괄 답변 바 ───

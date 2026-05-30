@@ -13,14 +13,17 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * 관리자 리뷰·신고 운영 컨트롤러 (7-G R8).
+ * 관리자 리뷰·신고 운영 컨트롤러 (7-G R8, R10 답글).
  *
  * 경로: /api/admin/** — SecurityConfig 의 hasRole("ADMIN") 일괄 가드로 보호.
  *   (별도 메서드 레벨 권한 어노테이션 불필요 — 7-G R3~R7 컨트롤러와 동일 패턴)
  *
  * 엔드포인트:
  *   GET    /api/admin/reviews                 리뷰 목록 (hidden 필터)
+ *   GET    /api/admin/reviews/my-replies      내가 답변한 리뷰 목록 (마이페이지 관리자 탭)
  *   PATCH  /api/admin/reviews/{id}/visibility 리뷰 숨김/복원
+ *   PATCH  /api/admin/reviews/{id}/reply      리뷰 답글 작성·수정 (판매자 답변)
+ *   DELETE /api/admin/reviews/{id}/reply      리뷰 답글 삭제
  *   GET    /api/admin/reports                 신고 큐 (status 필터)
  *   POST   /api/admin/reports/{id}/resolve    신고 인용 (리뷰 숨김)
  *   POST   /api/admin/reports/{id}/dismiss    신고 기각
@@ -44,12 +47,37 @@ public class AdminReviewController {
         return ResponseEntity.ok(adminReviewService.listReviews(hidden, page, size));
     }
 
+    @Operation(summary = "내가 답변한 리뷰", description = "현재 로그인 관리자가 답변한 리뷰 목록(답변 최신순). 마이페이지 관리자 탭용.")
+    @GetMapping("/reviews/my-replies")
+    public ResponseEntity<PagedResponse<AdminReviewDto.ListItem>> listMyReplies(
+            @AuthenticationPrincipal UserDetails admin,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(adminReviewService.listMyReplies(admin.getUsername(), page, size));
+    }
+
     @Operation(summary = "리뷰 숨김/복원", description = "hidden=true 숨김, false 복원. 숨김 리뷰는 공개 페이지·별점 통계에서 제외.")
     @PatchMapping("/reviews/{id}/visibility")
     public ResponseEntity<AdminReviewDto.ListItem> updateVisibility(
             @PathVariable Long id,
             @RequestBody AdminReviewDto.VisibilityRequest request) {
         return ResponseEntity.ok(adminReviewService.updateVisibility(id, request.hidden()));
+    }
+
+    @Operation(summary = "리뷰 답글 작성·수정", description = "판매자 답변 upsert. 최초 작성·수정 동일 엔드포인트. 답변자는 현재 관리자.")
+    @PatchMapping("/reviews/{id}/reply")
+    public ResponseEntity<AdminReviewDto.ListItem> addReply(
+            @PathVariable Long id,
+            @RequestBody AdminReviewDto.ReplyRequest request,
+            @AuthenticationPrincipal UserDetails admin) {
+        return ResponseEntity.ok(
+                adminReviewService.addReply(id, request.content(), admin.getUsername()));
+    }
+
+    @Operation(summary = "리뷰 답글 삭제", description = "판매자 답변 제거 → 미답변 상태로 복귀.")
+    @DeleteMapping("/reviews/{id}/reply")
+    public ResponseEntity<AdminReviewDto.ListItem> removeReply(@PathVariable Long id) {
+        return ResponseEntity.ok(adminReviewService.removeReply(id));
     }
 
     // ─── 신고 ───────────────────────────────────────────
