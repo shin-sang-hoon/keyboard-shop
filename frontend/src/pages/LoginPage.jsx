@@ -48,13 +48,25 @@ export default function LoginPage() {
     } catch (err) {
       // status 별 한국어 매핑 (백엔드 메시지는 영어 — 프론트에서 변환).
       //  - 401: 인증 실패 (이메일/비번 불일치). enumeration 방지 위해 사유 합침.
-      //  - 403: 자격증명은 맞으나 계정 상태로 거부 (탈퇴 계정).
+      //  - 403: 자격증명은 맞으나 계정 상태로 거부. 백엔드 메시지 prefix 로 분기:
+      //         "WITHDRAWN:" → 탈퇴 / "SUSPENDED:" → 정지(+사유). (7-H)
       const status = err?.response?.status;
+      const backendMsg = err?.response?.data?.message || '';
       let msg;
       if (status === 401) {
         msg = '이메일 또는 비밀번호가 일치하지 않습니다.';
       } else if (status === 403) {
-        msg = '이 계정은 이미 탈퇴한 계정입니다.';
+        if (backendMsg.startsWith('SUSPENDED:')) {
+          // "SUSPENDED: This account has been suspended. Reason: xxx"
+          const reasonMatch = backendMsg.match(/Reason:\s*(.+)$/);
+          msg = reasonMatch
+            ? `정지된 계정입니다. 사유: ${reasonMatch[1].trim()}`
+            : '정지된 계정입니다. 자세한 사항은 고객센터로 문의해 주세요.';
+        } else if (backendMsg.startsWith('WITHDRAWN:')) {
+          msg = '이 계정은 이미 탈퇴한 계정입니다.';
+        } else {
+          msg = '로그인할 수 없는 계정 상태입니다.';
+        }
       } else {
         msg = '로그인 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.';
       }

@@ -40,11 +40,17 @@ import org.springframework.transaction.annotation.Transactional;
  *  - Both signup paths atomic with @Transactional - user + cart save together.
  *
  * 회원 탈퇴 (2026-05-29, soft delete):
- *  - withdraw(): status → WITHDRAWN (이메일/연관 데이터 보존, 재가입 차단).
+ *  - withdraw(): status -> WITHDRAWN (이메일/연관 데이터 보존, 재가입 차단).
  *  - login()/refresh()/loginByKakao() 에 status 가드 추가.
  *    중요: 가드는 자격증명 검증(password/OAuth) 통과 *후* 실행.
- *    검증 전에 status 를 보면 enumeration 누출 → 검증 후엔 "탈퇴 안내"가 누출 아님.
+ *    검증 전에 status 를 보면 enumeration 누출 -> 검증 후엔 "탈퇴 안내"가 누출 아님.
  *  - signup(): 기존 existsByEmail 로 자동 차단 + 탈퇴 계정이면 메시지 분기.
+ *
+ * 7-H 회원 관리 강화 (2026-05-30, 제재):
+ *  - status 에 SUSPENDED 추가 (관리자 정지). 로그인 가드를 ensureNotWithdrawn ->
+ *    ensureLoginable 로 일반화: WITHDRAWN(탈퇴) + SUSPENDED(정지) 둘 다 403 차단.
+ *    메시지를 분기(탈퇴/정지+사유)하여 프론트가 다른 안내를 띄울 수 있게 함.
+ *    enumeration 원칙 동일 — 자격증명 통과 *후* 검사이므로 상태 노출은 본인 한정.
  */
 @Slf4j
 @Service
@@ -62,7 +68,7 @@ public class AuthService {
      * 409 Conflict if email already taken.
      *
      * 회원 탈퇴: 탈퇴 처리된 이메일이면 재가입 차단 + 안내 메시지 분기
-     * (soft delete 라 row 가 남아 existsByEmail=true → 자연 차단되지만,
+     * (soft delete 라 row 가 남아 existsByEmail=true -> 자연 차단되지만,
      *  "이미 사용 중" 보다 "탈퇴 계정" 안내가 정확).
      *
      * Phase 8 5-D: also create Cart in same transaction.
@@ -102,9 +108,9 @@ public class AuthService {
      * 401 Unauthorized for both "no such user" and "wrong password" -
      * a deliberate choice so attackers cannot probe for valid emails.
      *
-     * 회원 탈퇴 가드: password 검증을 모두 통과한 *후* status 확인.
+     * 가드: password 검증을 모두 통과한 *후* status 확인 (탈퇴/정지 차단).
      * 순서가 핵심 — 검증 전에 status 를 보면 이메일 존재 여부가 새지만,
-     * 검증 통과 후엔 본인(또는 자격증명 탈취자)이므로 "탈퇴 계정" 안내가 누출이 아님.
+     * 검증 통과 후엔 본인(또는 자격증명 탈취자)이므로 상태 안내가 누출이 아님.
      */
     @Transactional(readOnly = true)
     public AuthResponse login(AuthRequest request) {
@@ -122,8 +128,8 @@ public class AuthService {
             throw BusinessException.unauthorized("Invalid email or password");
         }
 
-        // 자격증명 검증 통과 후 status 가드 (탈퇴 계정 차단)
-        ensureNotWithdrawn(user);
+        // 자격증명 검증 통과 후 status 가드 (탈퇴/정지 계정 차단)
+        ensureLoginable(user);
 
         log.info("Login success: email={}", user.getEmail());
         return buildAuthResponse(user);
@@ -132,7 +138,7 @@ public class AuthService {
     /**
      * Issue a new access token from a valid refresh token.
      *
-     * 회원 탈퇴 가드: 탈퇴 직전 발급된 refresh 토큰이 만료 전이라도
+     * 가드: 탈퇴/정지 직전 발급된 refresh 토큰이 만료 전이라도
      * 재발급을 막아야 함 (토큰 유효성 != 계정 활성).
      */
     @Transactional(readOnly = true)
@@ -149,8 +155,8 @@ public class AuthService {
                 .orElseThrow(() -> BusinessException.unauthorized(
                         "User no longer exists"));
 
-        // 토큰은 유효해도 탈퇴 계정이면 재발급 거부
-        ensureNotWithdrawn(user);
+        // 토큰은 유효해도 탈퇴/정지 계정이면 재발급 거부
+        ensureLoginable(user);
 
         log.info("Token refresh: email={}", user.getEmail());
         return buildAuthResponse(user);
@@ -184,8 +190,8 @@ public class AuthService {
      *
      * - LOCAL: password 재인증 필수 (탈퇴는 되돌릴 수 없으므로 본인 확인).
      * - KAKAO: 비밀번호가 없어 재인증 생략 (프론트 확인 모달로 대체).
-     * - status → WITHDRAWN + withdrawnAt 기록. 이메일/리뷰/주문 등 연관 데이터 보존.
-     * - 토큰은 stateless 라 서버 폐기 없음 → 프론트가 토큰 버리고 로그아웃.
+     * - status -> WITHDRAWN + withdrawnAt 기록. 이메일/리뷰/주문 등 연관 데이터 보존.
+     * - 토큰은 stateless 라 서버 폐기 없음 -> 프론트가 토큰 버리고 로그아웃.
      *   (Redis 블랙리스트는 Phase 8 todo)
      *
      * @param email   인증된 사용자 이메일 (컨트롤러가 SecurityContext 에서 추출)
@@ -201,7 +207,7 @@ public class AuthService {
             throw BusinessException.conflict("Account is already withdrawn");
         }
 
-        // LOCAL 유저는 비밀번호 재인증 (KAKAO 는 password 없음 → 생략)
+        // LOCAL 유저는 비밀번호 재인증 (KAKAO 는 password 없음 -> 생략)
         if (user.getProvider() == User.Provider.LOCAL) {
             String pw = request == null ? null : request.password();
             if (pw == null || pw.isBlank()) {
@@ -229,8 +235,8 @@ public class AuthService {
     /**
      * Kakao OAuth callback handler.
      *
-     * 회원 탈퇴 가드: 기존 Kakao 유저를 찾은 경우, OAuth 인증은 통과했어도
-     * 탈퇴 계정이면 로그인 거부. (신규 자동가입 경로는 탈퇴와 무관.)
+     * 가드: 기존 Kakao 유저를 찾은 경우, OAuth 인증은 통과했어도
+     * 탈퇴/정지 계정이면 로그인 거부. (신규 자동가입 경로는 무관.)
      */
     @Transactional
     public AuthResponse loginByKakao(String code) {
@@ -248,7 +254,7 @@ public class AuthService {
                 .findByProviderAndProviderId(User.Provider.KAKAO, providerId)
                 .map(existing -> {
                     // 기존 Kakao 유저 — OAuth 통과 후 status 가드
-                    ensureNotWithdrawn(existing);
+                    ensureLoginable(existing);
                     return existing;
                 })
                 .orElseGet(() -> registerKakaoUser(email, nickname, providerId));
@@ -300,13 +306,24 @@ public class AuthService {
     // ------------------------------------------------------------------------
 
     /**
-     * 탈퇴 계정 가드. 자격증명 검증 통과 후에만 호출할 것.
+     * 로그인 가능 상태 가드. 자격증명 검증 통과 후에만 호출할 것.
      * 403 Forbidden — 인증은 됐으나(자격증명 맞음) 계정 상태로 인해 거부.
+     *
+     * - WITHDRAWN: 본인 탈퇴 계정.
+     * - SUSPENDED: 관리자 제재(정지) 계정. 사유가 있으면 메시지에 포함하여
+     *   프론트가 안내할 수 있게 함. (자격증명 통과 후이므로 본인 한정 노출)
+     *
+     * 7-H: ensureNotWithdrawn 에서 일반화. 메시지 prefix("WITHDRAWN:"/"SUSPENDED:")로
+     *   프론트가 케이스를 구분 (LoginPage 403 분기).
      */
-    private void ensureNotWithdrawn(User user) {
+    private void ensureLoginable(User user) {
         if (user.getStatus() == User.Status.WITHDRAWN) {
-            throw BusinessException.forbidden(
-                    "This account has been withdrawn.");
+            throw BusinessException.forbidden("WITHDRAWN: This account has been withdrawn.");
+        }
+        if (user.getStatus() == User.Status.SUSPENDED) {
+            String reason = (user.getSuspendReason() == null || user.getSuspendReason().isBlank())
+                    ? "" : " Reason: " + user.getSuspendReason();
+            throw BusinessException.forbidden("SUSPENDED: This account has been suspended." + reason);
         }
     }
 

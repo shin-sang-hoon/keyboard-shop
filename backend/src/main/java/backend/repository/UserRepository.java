@@ -20,14 +20,19 @@ import java.util.Optional;
  *  - countByRole(Role) 추가 — "마지막 ADMIN 강등 방지" 불변식 검증용.
  *
  * 아이디 찾기 (2026-05-29):
- *  - findByNameAndStatus 추가 — 이름으로 ACTIVE 계정 조회 → 이메일 마스킹 표시.
+ *  - findByNameAndStatus 추가 — 이름으로 ACTIVE 계정 조회 -> 이메일 마스킹 표시.
  *    동명이인 가능성으로 List 반환.
+ *
+ * 7-H 회원 관리 강화 (2026-05-30):
+ *  - findByStatus(Status, Pageable) 추가 — 관리자 회원목록 status 필터
+ *    (정상/정지/탈퇴). idx_user_status 인덱스 활용.
  *
  * 인덱스 매칭:
  *  User 엔티티의 idx_user_provider (provider, provider_id) 인덱스가
  *  findByProviderAndProviderId 의 WHERE 절 컬럼 순서와 정확히 매칭되어
  *  카카오 로그인 시 풀스캔 없이 인덱스 lookup 으로 동작.
- *  findByProvider 도 동일 인덱스의 선행 컬럼(provider)만 사용 → 인덱스 활용.
+ *  findByProvider 도 동일 인덱스의 선행 컬럼(provider)만 사용 -> 인덱스 활용.
+ *  findByStatus 는 idx_user_status (status) 인덱스를 직접 활용.
  */
 public interface UserRepository extends JpaRepository<User, Long> {
 
@@ -48,14 +53,21 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Page<User> findByProvider(User.Provider provider, Pageable pageable);
 
     /**
+     * Status 별 회원 목록 (페이징). 7-H 관리자 회원 관리 강화.
+     * status 필터가 '전체' 가 아닐 때만 호출 (AdminUserService 분기).
+     * idx_user_status 인덱스 활용.
+     */
+    Page<User> findByStatus(User.Status status, Pageable pageable);
+
+    /**
      * role 별 회원 수. 7-G 라운드 4 "마지막 ADMIN 강등 방지" 불변식.
-     * ADMIN→USER 강등 직전 countByRole(ADMIN) == 1 이면 차단.
+     * ADMIN->USER 강등 직전 countByRole(ADMIN) == 1 이면 차단.
      */
     long countByRole(User.Role role);
 
     /**
      * 이름 + 상태로 회원 조회 (아이디 찾기, 5/29).
-     * ACTIVE 계정만 대상 (탈퇴 회원은 찾기 제외). 동명이인 가능 → List.
+     * ACTIVE 계정만 대상 (탈퇴 회원은 찾기 제외). 동명이인 가능 -> List.
      */
     List<User> findByNameAndStatus(String name, User.Status status);
 }

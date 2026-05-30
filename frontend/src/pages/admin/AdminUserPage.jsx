@@ -1,12 +1,15 @@
 // frontend/src/pages/admin/AdminUserPage.jsx
 //
 // Phase 7-G 라운드 4 (2026-05-24) — 관리자 회원 관리.
+// 7-H 회원 관리 강화 (2026-05-30) — 상태(정상/정지/탈퇴) 표시 + 정지/해제 + 상태 필터.
 //
 // 기능:
-//   - 회원 목록 테이블 (id / 이메일 / 이름 / 권한 / 가입경로 / 가입일)
-//   - Provider 필터 (전체 / LOCAL / KAKAO)
+//   - 회원 목록 테이블 (id / 이메일 / 이름 / 권한 / 상태 / 가입경로 / 가입일)
+//   - Provider 필터 (전체 / LOCAL / KAKAO) + Status 필터 (전체 / 정상 / 정지 / 탈퇴)
 //   - 페이징 (이전 / 다음)
-//   - role 변경 버튼 (USER ↔ ADMIN) — 본인은 백엔드가 400 으로 차단
+//   - role 변경 버튼 (USER ↔ ADMIN) — 본인/마지막ADMIN 은 백엔드가 400 차단
+//   - 정지 / 정지 해제 버튼 — 본인/ADMIN/탈퇴 계정은 백엔드가 400 차단
+//     · 정지 시 사유 입력(prompt). 탈퇴 회원은 버튼 비활성(이미 탈퇴).
 //
 // 디자인: swagkey 화이트 톤. AdminAuditLogPage 와 동일 톤.
 
@@ -16,40 +19,58 @@ import { adminUserApi } from '../../api/adminUser';
 
 const PAGE_SIZE = 20;
 
-const PROVIDER_FILTERS = [
-  { value: '',      label: '전체' },
-  { value: 'LOCAL', label: '이메일 (LOCAL)' },
-  { value: 'KAKAO', label: '카카오 (KAKAO)' },
+// provider 와 status 는 백엔드가 둘 중 하나만 적용 → 단일 통합 필터로 운용.
+// value 는 { provider, status } 조합. 빈 객체 = 전체.
+const FILTERS = [
+  { key: 'ALL',       label: '전체',          provider: '',      status: '' },
+  { key: 'LOCAL',     label: '이메일',        provider: 'LOCAL', status: '' },
+  { key: 'KAKAO',     label: '카카오',        provider: 'KAKAO', status: '' },
+  { key: 'ACTIVE',    label: '정상',          provider: '',      status: 'ACTIVE' },
+  { key: 'SUSPENDED', label: '정지',          provider: '',      status: 'SUSPENDED' },
+  { key: 'WITHDRAWN', label: '탈퇴',          provider: '',      status: 'WITHDRAWN' },
 ];
+
+const STATUS_LABEL = {
+  ACTIVE:    '정상',
+  SUSPENDED: '정지',
+  WITHDRAWN: '탈퇴',
+};
 
 export default function AdminUserPage() {
   const [data, setData] = useState(null);   // PagedResponse
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [provider, setProvider] = useState('');
+  const [filterKey, setFilterKey] = useState('ALL');
   const [page, setPage] = useState(0);
-  const [updatingId, setUpdatingId] = useState(null);  // role 변경 중인 회원 id
+  const [busyId, setBusyId] = useState(null);  // 작업(role/정지/해제) 중인 회원 id
+
+  const activeFilter = FILTERS.find((f) => f.key === filterKey) ?? FILTERS[0];
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await adminUserApi.list({ provider, page, size: PAGE_SIZE });
+      const res = await adminUserApi.list({
+        provider: activeFilter.provider,
+        status: activeFilter.status,
+        page,
+        size: PAGE_SIZE,
+      });
       setData(res);
     } catch (e) {
       setError('회원 목록을 불러오지 못했습니다.');
     } finally {
       setLoading(false);
     }
-  }, [provider, page]);
+  }, [activeFilter.provider, activeFilter.status, page]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  // Provider 필터 변경 → 0페이지로 리셋
-  const handleProviderChange = (value) => {
-    setProvider(value);
+  // 필터 변경 → 0페이지로 리셋
+  const handleFilterChange = (key) => {
+    setFilterKey(key);
     setPage(0);
   };
 
@@ -61,16 +82,55 @@ export default function AdminUserPage() {
     );
     if (!ok) return;
 
-    setUpdatingId(user.id);
+    setBusyId(user.id);
     try {
       await adminUserApi.updateRole(user.id, nextRole);
-      await load();  // 변경 후 목록 새로고침
+      await load();
     } catch (e) {
-      // 백엔드 400 (본인 권한 변경 차단 등) 메시지 노출
       const msg = e?.response?.data?.message || '권한 변경에 실패했습니다.';
       window.alert(msg);
     } finally {
-      setUpdatingId(null);
+      setBusyId(null);
+    }
+  };
+
+  // 정지
+  const handleSuspend = async (user) => {
+    const reason = window.prompt(
+      `${user.name} (${user.email}) 님을 정지합니다.\n정지 사유를 입력하세요. (선택, 비워도 됨)`,
+      ''
+    );
+    // prompt 취소 시 null → 중단. 빈 문자열("")은 사유 없이 정지 진행.
+    if (reason === null) return;
+
+    setBusyId(user.id);
+    try {
+      await adminUserApi.suspend(user.id, reason);
+      await load();
+    } catch (e) {
+      const msg = e?.response?.data?.message || '정지에 실패했습니다.';
+      window.alert(msg);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // 정지 해제
+  const handleUnsuspend = async (user) => {
+    const ok = window.confirm(
+      `${user.name} (${user.email}) 님의 정지를 해제할까요?`
+    );
+    if (!ok) return;
+
+    setBusyId(user.id);
+    try {
+      await adminUserApi.unsuspend(user.id);
+      await load();
+    } catch (e) {
+      const msg = e?.response?.data?.message || '정지 해제에 실패했습니다.';
+      window.alert(msg);
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -84,6 +144,12 @@ export default function AdminUserPage() {
     });
   };
 
+  const statusBadgeStyle = (status) => {
+    if (status === 'SUSPENDED') return S.badgeSuspended;
+    if (status === 'WITHDRAWN') return S.badgeWithdrawn;
+    return S.badgeActive;
+  };
+
   const rows = data?.content ?? [];
   const totalElements = data?.totalElements ?? 0;
   const totalPages = data?.totalPages ?? 0;
@@ -95,19 +161,19 @@ export default function AdminUserPage() {
       {/* 헤더 */}
       <div style={S.header}>
         <h2 style={S.title}>회원 관리</h2>
-        <p style={S.desc}>전체 회원 목록 · 가입 경로 필터 · 권한(USER / ADMIN) 변경</p>
+        <p style={S.desc}>회원 목록 · 가입 경로/상태 필터 · 권한 변경 · 정지/해제</p>
       </div>
 
-      {/* Provider 필터 */}
+      {/* 통합 필터 (provider + status) */}
       <div style={S.filterBar}>
-        {PROVIDER_FILTERS.map((f) => (
+        {FILTERS.map((f) => (
           <button
-            key={f.value}
+            key={f.key}
             type="button"
-            onClick={() => handleProviderChange(f.value)}
+            onClick={() => handleFilterChange(f.key)}
             style={{
               ...S.filterBtn,
-              ...(provider === f.value ? S.filterBtnActive : {}),
+              ...(filterKey === f.key ? S.filterBtnActive : {}),
             }}
           >
             {f.label}
@@ -128,57 +194,101 @@ export default function AdminUserPage() {
         <table style={S.table}>
           <thead>
             <tr>
-              <th style={{ ...S.th, width: '60px' }}>ID</th>
+              <th style={{ ...S.th, width: '56px' }}>ID</th>
               <th style={S.th}>이메일</th>
-              <th style={{ ...S.th, width: '120px' }}>이름</th>
-              <th style={{ ...S.th, width: '100px' }}>권한</th>
-              <th style={{ ...S.th, width: '120px' }}>가입 경로</th>
-              <th style={{ ...S.th, width: '160px' }}>가입일</th>
-              <th style={{ ...S.th, width: '140px' }}>관리</th>
+              <th style={{ ...S.th, width: '110px' }}>이름</th>
+              <th style={{ ...S.th, width: '90px' }}>권한</th>
+              <th style={{ ...S.th, width: '150px' }}>상태</th>
+              <th style={{ ...S.th, width: '100px' }}>가입 경로</th>
+              <th style={{ ...S.th, width: '150px' }}>가입일</th>
+              <th style={{ ...S.th, width: '180px' }}>관리</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={7} style={S.emptyCell}>불러오는 중...</td>
+                <td colSpan={8} style={S.emptyCell}>불러오는 중...</td>
               </tr>
             )}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={7} style={S.emptyCell}>회원이 없습니다.</td>
+                <td colSpan={8} style={S.emptyCell}>회원이 없습니다.</td>
               </tr>
             )}
-            {!loading && rows.map((u) => (
-              <tr key={u.id} style={S.tr}>
-                <td style={S.td}>{u.id}</td>
-                <td style={S.td}>{u.email}</td>
-                <td style={S.td}>{u.name}</td>
-                <td style={S.td}>
-                  <span style={u.role === 'ADMIN' ? S.badgeAdmin : S.badgeUser}>
-                    {u.role}
-                  </span>
-                </td>
-                <td style={S.td}>
-                  <span style={S.providerText}>{u.provider}</span>
-                </td>
-                <td style={S.td}>{fmtDate(u.createdAt)}</td>
-                <td style={S.td}>
-                  <button
-                    type="button"
-                    onClick={() => handleToggleRole(u)}
-                    disabled={updatingId === u.id}
-                    style={{
-                      ...S.roleBtn,
-                      ...(updatingId === u.id ? S.roleBtnDisabled : {}),
-                    }}
-                  >
-                    {updatingId === u.id
-                      ? '변경 중...'
-                      : u.role === 'ADMIN' ? 'USER 로 변경' : 'ADMIN 으로 변경'}
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {!loading && rows.map((u) => {
+              const isWithdrawn = u.status === 'WITHDRAWN';
+              const isSuspended = u.status === 'SUSPENDED';
+              const isAdmin = u.role === 'ADMIN';
+              const busy = busyId === u.id;
+              return (
+                <tr key={u.id} style={S.tr}>
+                  <td style={S.td}>{u.id}</td>
+                  <td style={S.td}>{u.email}</td>
+                  <td style={S.td}>{u.name}</td>
+                  <td style={S.td}>
+                    <span style={isAdmin ? S.badgeAdmin : S.badgeUser}>{u.role}</span>
+                  </td>
+                  <td style={S.td}>
+                    <span style={statusBadgeStyle(u.status)}>
+                      {STATUS_LABEL[u.status] ?? u.status}
+                    </span>
+                    {isSuspended && u.suspendReason && (
+                      <div style={S.reasonText} title={u.suspendReason}>
+                        {u.suspendReason}
+                      </div>
+                    )}
+                  </td>
+                  <td style={S.td}>
+                    <span style={S.providerText}>{u.provider}</span>
+                  </td>
+                  <td style={S.td}>{fmtDate(u.createdAt)}</td>
+                  <td style={S.td}>
+                    <div style={S.actionCol}>
+                      {/* role 변경 — 탈퇴 회원은 비활성 */}
+                      <button
+                        type="button"
+                        onClick={() => handleToggleRole(u)}
+                        disabled={busy || isWithdrawn}
+                        style={{
+                          ...S.actionBtn,
+                          ...((busy || isWithdrawn) ? S.actionBtnDisabled : {}),
+                        }}
+                      >
+                        {isAdmin ? 'USER 로' : 'ADMIN 으로'}
+                      </button>
+
+                      {/* 정지 / 해제 — 탈퇴 회원은 비활성, ADMIN 은 정지 숨김 */}
+                      {isSuspended ? (
+                        <button
+                          type="button"
+                          onClick={() => handleUnsuspend(u)}
+                          disabled={busy}
+                          style={{
+                            ...S.actionBtn, ...S.unsuspendBtn,
+                            ...(busy ? S.actionBtnDisabled : {}),
+                          }}
+                        >
+                          정지 해제
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleSuspend(u)}
+                          disabled={busy || isWithdrawn || isAdmin}
+                          style={{
+                            ...S.actionBtn, ...S.suspendBtn,
+                            ...((busy || isWithdrawn || isAdmin) ? S.actionBtnDisabled : {}),
+                          }}
+                          title={isAdmin ? '관리자는 정지할 수 없습니다 (먼저 USER 로 변경)' : ''}
+                        >
+                          정지
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -212,9 +322,7 @@ export default function AdminUserPage() {
 }
 
 const S = {
-  header: {
-    marginBottom: spacing[5],
-  },
+  header: { marginBottom: spacing[5] },
   title: {
     fontSize: typography.fontSize.xl,
     fontWeight: typography.fontWeight.bold,
@@ -231,6 +339,7 @@ const S = {
     display: 'flex',
     gap: spacing[2],
     marginBottom: spacing[4],
+    flexWrap: 'wrap',
   },
   filterBtn: {
     padding: `${spacing[2]} ${spacing[4]}`,
@@ -238,14 +347,16 @@ const S = {
     fontWeight: typography.fontWeight.medium,
     color: colors.textOnLightDim,
     background: colors.white,
-    border: `1px solid ${colors.borderLight}`,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.borderLight,
     borderRadius: radius.md,
     cursor: 'pointer',
   },
   filterBtnActive: {
     color: colors.white,
-    background: colors.accent,
-    borderColor: colors.accent,
+    background: colors.textOnLight,
+    borderColor: colors.textOnLight,
   },
   errorBanner: {
     background: '#fef2f2',
@@ -268,10 +379,7 @@ const S = {
     boxShadow: shadow.card,
     overflow: 'hidden',
   },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-  },
+  table: { width: '100%', borderCollapse: 'collapse' },
   th: {
     textAlign: 'left',
     padding: `${spacing[3]} ${spacing[4]}`,
@@ -282,9 +390,7 @@ const S = {
     borderBottom: `1px solid ${colors.borderLight}`,
     whiteSpace: 'nowrap',
   },
-  tr: {
-    borderBottom: `1px solid ${colors.borderLight}`,
-  },
+  tr: { borderBottom: `1px solid ${colors.borderLight}` },
   td: {
     padding: `${spacing[3]} ${spacing[4]}`,
     fontSize: typography.fontSize.sm,
@@ -317,26 +423,81 @@ const S = {
     border: `1px solid ${colors.borderLight}`,
     borderRadius: radius.sm,
   },
+  // 상태 뱃지 — 정상(회색)/정지(주황)/탈퇴(빨강 흐림)
+  badgeActive: {
+    display: 'inline-block',
+    padding: '2px 10px',
+    fontSize: typography.fontSize.xs,
+    fontWeight: typography.fontWeight.semibold,
+    color: '#047857',
+    background: 'rgba(16, 185, 129, 0.1)',
+    border: '1px solid rgba(16, 185, 129, 0.3)',
+    borderRadius: radius.sm,
+  },
+  badgeSuspended: {
+    display: 'inline-block',
+    padding: '2px 10px',
+    fontSize: typography.fontSize.xs,
+    fontWeight: typography.fontWeight.semibold,
+    color: '#b45309',
+    background: 'rgba(245, 158, 11, 0.12)',
+    border: '1px solid rgba(245, 158, 11, 0.35)',
+    borderRadius: radius.sm,
+  },
+  badgeWithdrawn: {
+    display: 'inline-block',
+    padding: '2px 10px',
+    fontSize: typography.fontSize.xs,
+    fontWeight: typography.fontWeight.semibold,
+    color: '#94a3b8',
+    background: colors.surfaceMuted,
+    border: `1px solid ${colors.borderLight}`,
+    borderRadius: radius.sm,
+  },
+  reasonText: {
+    marginTop: '4px',
+    fontSize: '11px',
+    color: '#b45309',
+    maxWidth: '140px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
   providerText: {
     fontSize: typography.fontSize.xs,
     color: colors.textOnLightDim,
     fontFamily: typography.fontFamily.mono,
   },
-  roleBtn: {
+  actionCol: {
+    display: 'flex',
+    gap: spacing[2],
+    flexWrap: 'wrap',
+  },
+  actionBtn: {
     padding: `${spacing[2]} ${spacing[3]}`,
     fontSize: typography.fontSize.xs,
     fontWeight: typography.fontWeight.medium,
     color: colors.textOnLight,
     background: colors.white,
-    border: `1px solid ${colors.borderLight}`,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.borderLight,
     borderRadius: radius.sm,
     cursor: 'pointer',
     whiteSpace: 'nowrap',
   },
-  roleBtnDisabled: {
+  suspendBtn: {
+    color: '#b45309',
+    borderColor: 'rgba(245, 158, 11, 0.5)',
+  },
+  unsuspendBtn: {
+    color: '#047857',
+    borderColor: 'rgba(16, 185, 129, 0.5)',
+  },
+  actionBtnDisabled: {
     color: colors.textOnLightDim,
     cursor: 'not-allowed',
-    opacity: 0.6,
+    opacity: 0.5,
   },
   pager: {
     display: 'flex',
