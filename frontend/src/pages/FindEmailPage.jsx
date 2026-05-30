@@ -1,22 +1,20 @@
 // frontend/src/pages/FindEmailPage.jsx
 //
-// 아이디(이메일) 찾기 (5/29). 이름 입력 → 마스킹된 이메일 목록 표시.
-//
-// 흐름:
-//   1) 이름 입력 → authApi.findEmail(name)
-//   2) { emails: [...] } 수신 → 마스킹 이메일 목록 렌더 (동명이인이면 여러 개)
-//   3) 빈 배열이면 "일치하는 계정 없음" 안내
-//   - 백엔드가 ACTIVE 계정만 조회 + 이메일 마스킹 (po*****@gmail.com).
+// 아이디(이메일) 찾기 (5/29, 5/30 UI 정돈). 이름 입력 → 마스킹된 이메일 목록 표시.
+//   - 백엔드가 ACTIVE 계정만 조회 + 이메일 마스킹 (po*****@gmail.com). 동명이인이면 여러 개.
+// 디자인: 사이트 공통 톤(흰 배경 + 검정 포인트) 유지.
 
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { authApi } from '../api/auth';
-import { colors, typography, spacing, radius } from '../styles/tokens';
+import { colors, typography, spacing, radius, shadow, transition } from '../styles/tokens';
 
 export default function FindEmailPage() {
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null); // null=미조회, []=없음, [..]=있음
+  const [focused, setFocused] = useState(false);
+  const [hover, setHover] = useState(false);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -47,8 +45,10 @@ export default function FindEmailPage() {
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
               required
-              style={S.input}
+              style={{ ...S.input, ...(focused ? S.inputFocus : {}) }}
               placeholder="홍길동"
             />
           </label>
@@ -56,7 +56,13 @@ export default function FindEmailPage() {
           <button
             type="submit"
             disabled={submitting || !name}
-            style={{ ...S.primaryBtn, ...(submitting || !name ? S.btnDisabled : {}) }}
+            onMouseEnter={() => setHover(true)}
+            onMouseLeave={() => setHover(false)}
+            style={{
+              ...S.primaryBtn,
+              ...(hover && !(submitting || !name) ? S.primaryBtnHover : {}),
+              ...(submitting || !name ? S.btnDisabled : {}),
+            }}
           >
             {submitting ? '찾는 중...' : '아이디 찾기'}
           </button>
@@ -67,11 +73,9 @@ export default function FindEmailPage() {
             {result.length > 0 ? (
               <>
                 <div style={S.resultLabel}>찾은 이메일</div>
-                <ul style={S.resultList}>
-                  {result.map((em, i) => (
-                    <li key={i} style={S.resultItem}>{em}</li>
-                  ))}
-                </ul>
+                {result.map((em, i) => (
+                  <div key={i} style={S.resultItem}>{em}</div>
+                ))}
               </>
             ) : (
               <div style={S.resultEmpty}>입력하신 이름과 일치하는 계정을 찾을 수 없어요.</div>
@@ -80,9 +84,9 @@ export default function FindEmailPage() {
         )}
 
         <div style={S.footer}>
-          <Link to="/login" style={S.link}>로그인</Link>
-          {' · '}
           <Link to="/forgot-password" style={S.link}>비밀번호 찾기</Link>
+          <span style={S.footerDivider}>·</span>
+          <Link to="/login" style={S.link}>로그인</Link>
         </div>
       </div>
     </div>
@@ -91,19 +95,21 @@ export default function FindEmailPage() {
 
 const S = {
   page: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: spacing[4], background: colors.surface, fontFamily: typography.fontFamily.base },
-  card: { width: '100%', maxWidth: 420, background: colors.white, border: `1px solid ${colors.borderLight}`, borderRadius: radius.lg, padding: `${spacing[8]} ${spacing[6]}`, boxShadow: '0 4px 16px rgba(0, 0, 0, 0.04)' },
-  title: { fontSize: typography.fontSize['3xl'], fontWeight: typography.fontWeight.bold, color: colors.textOnLight, margin: 0, letterSpacing: typography.letterSpacing.tight },
-  subtitle: { color: colors.textOnLightDim, fontSize: typography.fontSize.sm, marginTop: spacing[2], marginBottom: spacing[6], lineHeight: 1.6 },
-  label: { display: 'block', marginBottom: spacing[4] },
+  card: { width: '100%', maxWidth: 400, background: colors.white, border: `1px solid ${colors.borderLight}`, borderRadius: radius.xl, padding: `${spacing[10]} ${spacing[8]}`, boxShadow: shadow.card, textAlign: 'center' },
+  title: { fontSize: typography.fontSize['2xl'], fontWeight: typography.fontWeight.bold, color: colors.textOnLight, margin: 0, letterSpacing: typography.letterSpacing.tight },
+  subtitle: { color: colors.textOnLightDim, fontSize: typography.fontSize.base, marginTop: spacing[3], marginBottom: spacing[6], lineHeight: typography.lineHeight.relaxed },
+  label: { display: 'block', marginBottom: spacing[4], textAlign: 'left' },
   labelText: { display: 'block', fontSize: typography.fontSize.sm, fontWeight: typography.fontWeight.semibold, color: colors.textOnLight, marginBottom: spacing[2] },
-  input: { width: '100%', padding: spacing[3], fontSize: typography.fontSize.base, background: colors.white, border: `1px solid ${colors.borderLight}`, borderRadius: radius.md, color: colors.textOnLight, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' },
-  primaryBtn: { width: '100%', padding: `${spacing[3]} ${spacing[4]}`, fontSize: typography.fontSize.base, fontWeight: typography.fontWeight.semibold, background: colors.textOnLight, color: colors.white, border: 'none', borderRadius: radius.md, cursor: 'pointer', fontFamily: 'inherit' },
+  input: { width: '100%', padding: `${spacing[3]} ${spacing[4]}`, fontSize: typography.fontSize.md, background: colors.white, border: `1px solid ${colors.borderLight}`, borderRadius: radius.lg, color: colors.textOnLight, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', transition: transition.base },
+  inputFocus: { borderColor: colors.textOnLight, boxShadow: `0 0 0 3px rgba(15, 23, 42, 0.08)` },
+  primaryBtn: { width: '100%', padding: `${spacing[3]} ${spacing[4]}`, fontSize: typography.fontSize.md, fontWeight: typography.fontWeight.semibold, background: colors.textOnLight, color: colors.white, border: 'none', borderRadius: radius.lg, cursor: 'pointer', fontFamily: 'inherit', transition: transition.base },
+  primaryBtnHover: { opacity: 0.88 },
   btnDisabled: { opacity: 0.4, cursor: 'not-allowed' },
-  resultBox: { marginTop: spacing[5], padding: spacing[4], background: colors.surface, border: `1px solid ${colors.borderLight}`, borderRadius: radius.md },
-  resultLabel: { fontSize: typography.fontSize.sm, fontWeight: typography.fontWeight.semibold, color: colors.textOnLightDim, marginBottom: spacing[2] },
-  resultList: { listStyle: 'none', padding: 0, margin: 0 },
-  resultItem: { fontSize: typography.fontSize.base, fontWeight: typography.fontWeight.semibold, color: colors.textOnLight, padding: `${spacing[1]} 0`, fontFamily: 'monospace' },
-  resultEmpty: { fontSize: typography.fontSize.sm, color: colors.textOnLightDim },
-  footer: { marginTop: spacing[5], textAlign: 'center', fontSize: typography.fontSize.sm, color: colors.textOnLightDim },
-  link: { color: colors.textOnLight, textDecoration: 'underline', fontWeight: typography.fontWeight.semibold, textUnderlineOffset: '3px' },
+  resultBox: { marginTop: spacing[5], padding: `${spacing[4]} ${spacing[5]}`, background: colors.surfaceMuted, border: `1px solid ${colors.borderLight}`, borderRadius: radius.lg, textAlign: 'left' },
+  resultLabel: { fontSize: typography.fontSize.xs, fontWeight: typography.fontWeight.semibold, color: colors.textOnLightDim, marginBottom: spacing[2], letterSpacing: typography.letterSpacing.wide, textTransform: 'uppercase' },
+  resultItem: { fontSize: typography.fontSize.lg, fontWeight: typography.fontWeight.semibold, color: colors.textOnLight, padding: `${spacing[1]} 0`, fontFamily: typography.fontFamily.mono, letterSpacing: typography.letterSpacing.base },
+  resultEmpty: { fontSize: typography.fontSize.base, color: colors.textOnLightDim, lineHeight: typography.lineHeight.base },
+  footer: { marginTop: spacing[6], textAlign: 'center', fontSize: typography.fontSize.base, color: colors.textOnLightDim },
+  footerDivider: { margin: `0 ${spacing[3]}`, color: colors.borderLight },
+  link: { color: colors.textOnLight, textDecoration: 'none', fontWeight: typography.fontWeight.semibold },
 };
