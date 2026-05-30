@@ -168,7 +168,13 @@ export default function LoginPage() {
           {kakaoLoading ? '카카오로 이동 중...' : '카카오로 시작하기'}
         </button>
 
-        <div style={S.footer}>
+        <div style={{ ...S.footer, marginTop: spacing[5] }}>
+          <Link to="/forgot-password" style={S.link}>비밀번호 찾기</Link>
+          {' · '}
+          <Link to="/find-email" style={S.link}>아이디 찾기</Link>
+        </div>
+
+        <div style={{ ...S.footer, marginTop: spacing[2] }}>
           처음이신가요?{' '}
           <Link to="/signup/type" style={S.link}>
             회원가입

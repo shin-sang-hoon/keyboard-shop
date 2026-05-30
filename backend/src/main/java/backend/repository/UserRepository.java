@@ -5,6 +5,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -17,6 +18,10 @@ import java.util.Optional;
  *  - findAll(Pageable) 은 JpaRepository 기본 제공 (회원 목록 페이징).
  *  - findByProvider(Provider, Pageable) 추가 (Provider 필터).
  *  - countByRole(Role) 추가 — "마지막 ADMIN 강등 방지" 불변식 검증용.
+ *
+ * 아이디 찾기 (2026-05-29):
+ *  - findByNameAndStatus 추가 — 이름으로 ACTIVE 계정 조회 → 이메일 마스킹 표시.
+ *    동명이인 가능성으로 List 반환.
  *
  * 인덱스 매칭:
  *  User 엔티티의 idx_user_provider (provider, provider_id) 인덱스가
@@ -47,4 +52,10 @@ public interface UserRepository extends JpaRepository<User, Long> {
      * ADMIN→USER 강등 직전 countByRole(ADMIN) == 1 이면 차단.
      */
     long countByRole(User.Role role);
+
+    /**
+     * 이름 + 상태로 회원 조회 (아이디 찾기, 5/29).
+     * ACTIVE 계정만 대상 (탈퇴 회원은 찾기 제외). 동명이인 가능 → List.
+     */
+    List<User> findByNameAndStatus(String name, User.Status status);
 }

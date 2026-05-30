@@ -15,6 +15,9 @@ import ProductDetail from './pages/ProductDetail';
 import KeyboardBuilder from './pages/KeyboardBuilder';
 import KeyboardBuilderRoute from './pages/KeyboardBuilderRoute';
 import LoginPage from './pages/LoginPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
+import FindEmailPage from './pages/FindEmailPage';
 import SignupPage from './pages/SignupPage';
 import JoinTypeChoicePage from './pages/JoinTypeChoicePage';
 import JoinAgreePage from './pages/JoinAgreePage';
@@ -44,7 +47,7 @@ import { useCartStore } from './stores/cartStore';
 // '/auth' 추가: 카카오 콜백 페이지는 잠깐 거치는 페이지라 헤더/푸터 노출 불필요.
 // '/signup' prefix 라서 /signup/type, /signup/agree 도 자동 적용됨.
 // '/admin' 추가: 관리자 영역은 사용자 chrome 숨김 (Phase 7-A 의 AdminApp shell 도입 시 별도 admin chrome 제공 예정).
-const CHROME_HIDDEN_PATHS = ['/builder', '/login', '/signup', '/auth', '/admin'];
+const CHROME_HIDDEN_PATHS = ['/builder', '/login', '/signup', '/auth', '/admin', '/forgot-password', '/reset-password', '/find-email'];
 
 function ConditionalChrome({ children }) {
   const location = useLocation();
@@ -94,6 +97,11 @@ function App() {
 
         {/* 5-B 인증/회원 */}
         <Route path="/login" element={<LoginPage />} />
+
+        {/* 5/29 - 비밀번호 찾기/재설정 + 아이디 찾기 (비로그인 사용) */}
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/find-email" element={<FindEmailPage />} />
 
         {/* 5-B Round 3 - 회원가입 3단계 분리 */}
         <Route path="/signup/type" element={<JoinTypeChoicePage />} />

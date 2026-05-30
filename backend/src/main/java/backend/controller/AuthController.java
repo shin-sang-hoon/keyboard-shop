@@ -4,9 +4,12 @@ import backend.dto.AuthRequest;
 import backend.dto.AuthResponse;
 import backend.dto.RefreshRequest;
 import backend.dto.WithdrawRequest;
+import backend.dto.PasswordResetDto;
 import backend.exception.BusinessException;
 import backend.service.AuthService;
 import backend.service.KakaoOAuthClient;
+import backend.service.PasswordResetService;
+import backend.service.UserQueryService;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +44,8 @@ public class AuthController {
 
     private final AuthService authService;
     private final KakaoOAuthClient kakaoOAuthClient;
+    private final PasswordResetService passwordResetService;
+    private final UserQueryService userQueryService;
 
     /** OAuth 성공/실패 시 프론트로 redirect 할 URL. application.properties 에 정의. */
     @Value("${kakao.frontend-redirect}")
@@ -106,6 +111,50 @@ public class AuthController {
         authService.withdraw(email, request);
         log.info("Withdraw processed: email={}", email);
         return ResponseEntity.ok().build();
+    }
+
+    // ========================================================================
+    // 비밀번호 찾기/재설정 + 아이디 찾기 (5/29) — 모두 비로그인 상태에서 사용
+    // ========================================================================
+
+    /**
+     * POST /api/auth/password/forgot
+     * Body: { "email": "..." }
+     *
+     * 비밀번호 찾기 요청. enumeration 방지를 위해 이메일 존재 여부와 무관하게 항상 200.
+     * 실제 ACTIVE + LOCAL 계정일 때만 토큰 생성 + 재설정 메일 발송(서비스 내부 분기).
+     */
+    @PostMapping("/password/forgot")
+    public ResponseEntity<Void> forgotPassword(@RequestBody PasswordResetDto.ForgotRequest request) {
+        passwordResetService.forgot(request.email());
+        return ResponseEntity.ok().build();
+    }
+
+    /**
+     * POST /api/auth/password/reset
+     * Body: { "token": "...", "newPassword": "..." }
+     *
+     * 메일 링크의 토큰으로 새 비밀번호 설정. 토큰 검증(존재/미사용/미만료) 후 변경 + 토큰 소멸.
+     */
+    @PostMapping("/password/reset")
+    public ResponseEntity<Void> resetPassword(@RequestBody PasswordResetDto.ResetRequest request) {
+        passwordResetService.reset(request.token(), request.newPassword());
+        return ResponseEntity.ok().build();
+    }
+
+    /**
+     * POST /api/auth/email/find
+     * Body: { "name": "..." }
+     * Returns: { "emails": ["wd*@test.com", ...] }
+     *
+     * 아이디(이메일) 찾기. 이름으로 ACTIVE 계정 조회 → 마스킹된 이메일 목록 반환.
+     * 동명이인이면 여러 개. 일치 없으면 빈 배열.
+     */
+    @PostMapping("/email/find")
+    public ResponseEntity<PasswordResetDto.FindEmailResponse> findEmail(
+            @RequestBody PasswordResetDto.FindEmailRequest request) {
+        var emails = userQueryService.findEmailsByName(request.name());
+        return ResponseEntity.ok(new PasswordResetDto.FindEmailResponse(emails));
     }
 
     /**

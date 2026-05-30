@@ -5,6 +5,8 @@
 // 5-B fix (5/12): 모든 함수가 axios response.data (= 백엔드 JSON body) 를
 // 반환하도록 통일. 이전엔 axios response 전체를 반환해서 useAuth 에서
 // data.accessToken 이 undefined → 토큰 저장 실패 → 로그인 후 /login 머무름.
+//
+// 5/29: 비밀번호 찾기/재설정 + 아이디 찾기 3종 추가.
 
 import apiClient from './client';
 
@@ -49,6 +51,30 @@ export const authApi = {
   // 본인 토큰으로만 동작 (SecurityContext email). 200 OK 후 프론트가 토큰 폐기.
   withdraw: async ({ password, reason } = {}) => {
     const res = await apiClient.post('/auth/withdraw', { password, reason });
+    return res.data;
+  },
+
+  // POST /api/auth/password/forgot - 비밀번호 찾기 요청 (재설정 메일 발송)
+  // body: { email }
+  // 항상 200 (enumeration 방지). 실제 ACTIVE+LOCAL 계정만 메일 발송.
+  forgotPassword: async (email) => {
+    const res = await apiClient.post('/auth/password/forgot', { email });
+    return res.data;
+  },
+
+  // POST /api/auth/password/reset - 비밀번호 재설정 (메일 링크의 토큰 사용)
+  // body: { token, newPassword }
+  // 토큰 검증(존재/미사용/미만료) 후 변경. 실패 시 400/403.
+  resetPassword: async (token, newPassword) => {
+    const res = await apiClient.post('/auth/password/reset', { token, newPassword });
+    return res.data;
+  },
+
+  // POST /api/auth/email/find - 아이디(이메일) 찾기
+  // body: { name }
+  // returns: { emails: ["po*****@gmail.com", ...] }  (마스킹, 동명이인 가능)
+  findEmail: async (name) => {
+    const res = await apiClient.post('/auth/email/find', { name });
     return res.data;
   },
 };
