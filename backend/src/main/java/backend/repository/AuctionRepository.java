@@ -12,6 +12,9 @@ public interface AuctionRepository extends JpaRepository<Auction, Long> {
 
     List<Auction> findBySeller(User seller);
     List<Auction> findByStatus(Auction.Status status);
+
+    /** Status 별 경매 수 (관리자 대시보드 — 진행중 ACTIVE 카운트). 5/30. */
+    long countByStatus(Auction.Status status);
     List<Auction> findByStatusOrderByEndAtAsc(Auction.Status status);
 
     // ─── Flash Deal 확장 (5/17) ───────────────────────────────────

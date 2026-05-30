@@ -69,6 +69,12 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Page<User> findByStatus(User.Status status, Pageable pageable);
 
     /**
+     * Status 별 회원 수 (관리자 대시보드 상태별 분포). 5/30.
+     * idx_user_status 인덱스 활용 — 정상/정지/탈퇴 카운트.
+     */
+    long countByStatus(User.Status status);
+
+    /**
      * 키워드로 회원 검색 (이름 OR 이메일, 대소문자 무시). 회원정보 수정 V23.
      * 관리자 회원 목록 상단 검색창에서 호출. status/provider 필터와 독립적으로 동작
      * (검색은 전체 회원 대상). 부분 일치(LIKE %kw%).
