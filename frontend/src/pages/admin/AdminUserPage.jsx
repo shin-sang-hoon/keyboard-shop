@@ -14,6 +14,7 @@
 // 디자인: swagkey 화이트 톤. AdminAuditLogPage 와 동일 톤.
 
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { colors, typography, spacing, radius, shadow } from '../../styles/tokens';
 import { adminUserApi } from '../../api/adminUser';
 
@@ -44,6 +45,12 @@ export default function AdminUserPage() {
   const [page, setPage] = useState(0);
   const [busyId, setBusyId] = useState(null);  // 작업(role/정지/해제) 중인 회원 id
 
+  // 검색: 입력값(searchInput)과 적용된 검색어(keyword) 분리.
+  // keyword 가 set 되면 list 가 검색 모드 (status/provider 무시).
+  const [searchInput, setSearchInput] = useState('');
+  const [keyword, setKeyword] = useState('');
+
+  const navigate = useNavigate();
   const activeFilter = FILTERS.find((f) => f.key === filterKey) ?? FILTERS[0];
 
   const load = useCallback(async () => {
@@ -51,6 +58,7 @@ export default function AdminUserPage() {
     setError(null);
     try {
       const res = await adminUserApi.list({
+        keyword,                       // 있으면 백엔드가 최우선 적용 (status/provider 무시)
         provider: activeFilter.provider,
         status: activeFilter.status,
         page,
@@ -62,17 +70,37 @@ export default function AdminUserPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeFilter.provider, activeFilter.status, page]);
+  }, [keyword, activeFilter.provider, activeFilter.status, page]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  // 필터 변경 → 0페이지로 리셋
+  // 필터 변경 → 0페이지로 리셋. 검색 모드도 해제(필터와 검색은 배타적).
   const handleFilterChange = (key) => {
     setFilterKey(key);
+    setKeyword('');
+    setSearchInput('');
     setPage(0);
   };
+
+  // 검색 실행 → keyword 적용 + 필터는 '전체'로 리셋(검색이 우선이므로 UI 의미 일치).
+  const handleSearch = () => {
+    const kw = searchInput.trim();
+    setKeyword(kw);
+    setFilterKey('ALL');
+    setPage(0);
+  };
+
+  // 검색 초기화
+  const handleClearSearch = () => {
+    setSearchInput('');
+    setKeyword('');
+    setPage(0);
+  };
+
+  // 회원 수정 페이지로 이동
+  const goEdit = (userId) => navigate(`/admin/users/${userId}/edit`);
 
   // role 토글 (USER ↔ ADMIN)
   const handleToggleRole = async (user) => {
@@ -181,6 +209,29 @@ export default function AdminUserPage() {
         ))}
       </div>
 
+      {/* 검색창 (이름/이메일) */}
+      <div style={S.searchBar}>
+        <input
+          type="text"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
+          placeholder="이름 또는 이메일로 검색"
+          style={S.searchInput}
+        />
+        <button type="button" onClick={handleSearch} style={S.searchBtn}>검색</button>
+        {keyword && (
+          <button type="button" onClick={handleClearSearch} style={S.clearBtn}>
+            검색 해제
+          </button>
+        )}
+      </div>
+      {keyword && (
+        <div style={S.searchNotice}>
+          '<strong>{keyword}</strong>' 검색 결과 (상태/경로 필터는 적용되지 않습니다)
+        </div>
+      )}
+
       {/* 에러 */}
       {error && <div style={S.errorBanner}>{error}</div>}
 
@@ -244,6 +295,19 @@ export default function AdminUserPage() {
                   <td style={S.td}>{fmtDate(u.createdAt)}</td>
                   <td style={S.td}>
                     <div style={S.actionCol}>
+                      {/* 수정 — 탈퇴 회원은 비활성(백엔드도 차단) */}
+                      <button
+                        type="button"
+                        onClick={() => goEdit(u.id)}
+                        disabled={isWithdrawn}
+                        style={{
+                          ...S.actionBtn, ...S.editBtn,
+                          ...(isWithdrawn ? S.actionBtnDisabled : {}),
+                        }}
+                      >
+                        수정
+                      </button>
+
                       {/* role 변경 — 탈퇴 회원은 비활성 */}
                       <button
                         type="button"
@@ -357,6 +421,55 @@ const S = {
     color: colors.white,
     background: colors.textOnLight,
     borderColor: colors.textOnLight,
+  },
+  searchBar: {
+    display: 'flex',
+    gap: spacing[2],
+    marginBottom: spacing[3],
+    maxWidth: 480,
+  },
+  searchInput: {
+    flex: 1,
+    padding: `${spacing[2]} ${spacing[3]}`,
+    fontSize: typography.fontSize.sm,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.borderLight,
+    borderRadius: radius.md,
+    fontFamily: 'inherit',
+    color: colors.textOnLight,
+    background: colors.white,
+    boxSizing: 'border-box',
+  },
+  searchBtn: {
+    padding: `${spacing[2]} ${spacing[4]}`,
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colors.white,
+    background: colors.textOnLight,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.textOnLight,
+    borderRadius: radius.md,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  },
+  clearBtn: {
+    padding: `${spacing[2]} ${spacing[3]}`,
+    fontSize: typography.fontSize.sm,
+    color: colors.textOnLightDim,
+    background: colors.white,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.borderLight,
+    borderRadius: radius.md,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  },
+  searchNotice: {
+    fontSize: typography.fontSize.sm,
+    color: colors.textOnLightDim,
+    marginBottom: spacing[3],
   },
   errorBanner: {
     background: '#fef2f2',
@@ -485,6 +598,11 @@ const S = {
     borderRadius: radius.sm,
     cursor: 'pointer',
     whiteSpace: 'nowrap',
+  },
+  editBtn: {
+    color: colors.textOnLight,
+    borderColor: colors.textOnLight,
+    fontWeight: typography.fontWeight.semibold,
   },
   suspendBtn: {
     color: '#b45309',

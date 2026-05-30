@@ -37,6 +37,38 @@ public class User {
     @Column(nullable = false)
     private String name;
 
+    /**
+     * 닉네임 (V23). NULL 허용 — 미설정 가능.
+     * 로그인/헤더 표시: 닉네임 있으면 "이름(닉네임)", 없으면 "이름"만. displayName() 참고.
+     */
+    @Column(length = 50)
+    private String nickname;
+
+    /**
+     * 휴대폰 번호 (V23). 회원가입 시 입력받았으나 그동안 컬럼 미보존이었던 것을 신설.
+     * 형식 강제 없이 문자열 보관 (하이픈 유무 무관).
+     */
+    @Column(length = 20)
+    private String phone;
+
+    /**
+     * 배송 주소 — 우편번호 (V23, Daum 우편번호 서비스 자동 입력).
+     */
+    @Column(length = 10)
+    private String zipcode;
+
+    /**
+     * 배송 주소 — 기본 주소 (V23, Daum 자동 입력).
+     */
+    @Column(length = 255)
+    private String address;
+
+    /**
+     * 배송 주소 — 상세 주소 (V23, 동/호수/층 등 사용자 직접 입력).
+     */
+    @Column(name = "address_detail", length = 255)
+    private String addressDetail;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Role role;
@@ -90,8 +122,22 @@ public class User {
     @Column(name = "suspend_reason", length = 255)
     private String suspendReason;
 
+    /**
+     * 관리자 메모 (V23). 관리자단에서만 입력/노출 — 회원 관리용 내부 메모.
+     * 사용자단 응답 DTO 에는 절대 노출하지 않음 (관리자 신뢰 경계).
+     */
+    @Column(name = "admin_memo", length = 500)
+    private String adminMemo;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
+
+    /**
+     * 최종 접속 시각 (V23). 로그인 성공 시 recordLogin() 으로 갱신.
+     * 관리자단 회원 상세에서 읽기전용 노출.
+     */
+    @Column(name = "last_login_at")
+    private LocalDateTime lastLoginAt;
 
     @PrePersist
     public void prePersist() {
@@ -102,6 +148,21 @@ public class User {
         if (this.status == null) {
             this.status = Status.ACTIVE;
         }
+    }
+
+    // ------------------------------------------------------------------------
+    // 표시용 (닉네임 규칙)
+    // ------------------------------------------------------------------------
+
+    /**
+     * 화면 표시 이름 (V23). 닉네임이 있으면 "이름(닉네임)", 없으면 "이름".
+     * 헤더/로그인 인사말 등에서 사용. 공백 닉네임은 미설정으로 간주.
+     */
+    public String displayName() {
+        if (this.nickname != null && !this.nickname.isBlank()) {
+            return this.name + "(" + this.nickname + ")";
+        }
+        return this.name;
     }
 
     // ------------------------------------------------------------------------
@@ -121,6 +182,11 @@ public class User {
     /** 탈퇴 회원 여부. */
     public boolean isWithdrawn() {
         return this.status == Status.WITHDRAWN;
+    }
+
+    /** 소셜(카카오 등) 계정 여부 — 비밀번호 변경 불가 분기 등에 사용. */
+    public boolean isSocial() {
+        return this.provider != null && this.provider != Provider.LOCAL;
     }
 
     /**
@@ -158,6 +224,62 @@ public class User {
         this.status = Status.ACTIVE;
         this.suspendedAt = null;
         this.suspendReason = null;
+    }
+
+    // ------------------------------------------------------------------------
+    // 프로필 수정 (V23, 도메인 응집)
+    // ------------------------------------------------------------------------
+
+    /**
+     * 공통 프로필 수정 (V23). 닉네임/휴대폰/주소 3종을 한 번에 반영.
+     * 사용자단·관리자단 양쪽에서 사용. 이름/이메일/권한/상태는 변경하지 않음.
+     * 빈 문자열은 NULL 로 정규화하여 "미설정" 과 일관되게 저장.
+     */
+    public void updateProfile(String nickname, String phone,
+                              String zipcode, String address, String addressDetail) {
+        this.nickname      = normalize(nickname);
+        this.phone         = normalize(phone);
+        this.zipcode       = normalize(zipcode);
+        this.address       = normalize(address);
+        this.addressDetail = normalize(addressDetail);
+    }
+
+    /**
+     * 비밀번호 변경 (V23). 이미 인코딩된 해시를 받아 저장 (인코딩은 서비스 책임).
+     * LOCAL 계정만 호출 — 서비스 레이어에서 provider 가드.
+     */
+    public void changePassword(String encodedPassword) {
+        this.password = encodedPassword;
+    }
+
+    /**
+     * 이름 수정 (V23, 관리자 전용). 사용자단에서는 이름 고정 — 호출 금지.
+     */
+    public void changeName(String name) {
+        if (name != null && !name.isBlank()) {
+            this.name = name;
+        }
+    }
+
+    /**
+     * 관리자 메모 수정 (V23, 관리자 전용). 빈 문자열은 NULL 정규화.
+     */
+    public void updateAdminMemo(String memo) {
+        this.adminMemo = normalize(memo);
+    }
+
+    /**
+     * 최종 접속 시각 갱신 (V23). 로그인 성공 시 호출.
+     */
+    public void recordLogin() {
+        this.lastLoginAt = LocalDateTime.now();
+    }
+
+    /** 빈 문자열/공백을 NULL 로 정규화 (미설정과 일관 저장). */
+    private static String normalize(String v) {
+        if (v == null) return null;
+        String t = v.trim();
+        return t.isEmpty() ? null : t;
     }
 
     public enum Role {

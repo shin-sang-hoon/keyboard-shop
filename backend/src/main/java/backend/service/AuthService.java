@@ -112,7 +112,7 @@ public class AuthService {
      * 순서가 핵심 — 검증 전에 status 를 보면 이메일 존재 여부가 새지만,
      * 검증 통과 후엔 본인(또는 자격증명 탈취자)이므로 상태 안내가 누출이 아님.
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public AuthResponse login(AuthRequest request) {
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> BusinessException.unauthorized(
@@ -130,6 +130,9 @@ public class AuthService {
 
         // 자격증명 검증 통과 후 status 가드 (탈퇴/정지 계정 차단)
         ensureLoginable(user);
+
+        // V23: 최종 접속 시각 갱신 (쓰기 트랜잭션 — dirty checking flush)
+        user.recordLogin();
 
         log.info("Login success: email={}", user.getEmail());
         return buildAuthResponse(user);
@@ -177,6 +180,7 @@ public class AuthService {
                 .refreshToken(null)
                 .email(user.getEmail())
                 .name(user.getName())
+                .displayName(user.displayName())
                 .role(user.getRole().name())
                 .build();
     }
@@ -337,6 +341,7 @@ public class AuthService {
                 .refreshToken(refreshToken)
                 .email(user.getEmail())
                 .name(user.getName())
+                .displayName(user.displayName())
                 .role(user.getRole().name())
                 .build();
     }

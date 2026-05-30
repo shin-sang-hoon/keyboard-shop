@@ -4,6 +4,8 @@ import backend.entity.User;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
@@ -26,6 +28,13 @@ import java.util.Optional;
  * 7-H 회원 관리 강화 (2026-05-30):
  *  - findByStatus(Status, Pageable) 추가 — 관리자 회원목록 status 필터
  *    (정상/정지/탈퇴). idx_user_status 인덱스 활용.
+ *
+ * 회원정보 수정 V23 (2026-05-30):
+ *  - searchByKeyword(keyword, Pageable) 추가 — 관리자 회원 검색(이름 OR 이메일).
+ *    LOWER(...) LIKE 로 대소문자 무시 부분일치. 검색은 status/provider 와 독립
+ *    (가장 구체적 필터이므로 AdminUserService 에서 최우선 분기).
+ *    주의: LIKE '%kw%' 선행 와일드카드라 인덱스 미활용(풀스캔). 회원 규모가
+ *    작아 실무상 문제없으나, 대규모 시 풀텍스트 인덱스(ngram) 전환 여지 — 면접 포인트.
  *
  * 인덱스 매칭:
  *  User 엔티티의 idx_user_provider (provider, provider_id) 인덱스가
@@ -58,6 +67,19 @@ public interface UserRepository extends JpaRepository<User, Long> {
      * idx_user_status 인덱스 활용.
      */
     Page<User> findByStatus(User.Status status, Pageable pageable);
+
+    /**
+     * 키워드로 회원 검색 (이름 OR 이메일, 대소문자 무시). 회원정보 수정 V23.
+     * 관리자 회원 목록 상단 검색창에서 호출. status/provider 필터와 독립적으로 동작
+     * (검색은 전체 회원 대상). 부분 일치(LIKE %kw%).
+     *
+     * 파라미터 바인딩 + LOWER 로 대소문자 무시. ESCAPE 미지정(검색어에 %_ 직접 입력은
+     * 드문 관리 용도라 허용) — 운영 노출 시 sanitize 고려.
+     */
+    @Query("SELECT u FROM User u "
+         + "WHERE LOWER(u.name) LIKE LOWER(CONCAT('%', :kw, '%')) "
+         + "   OR LOWER(u.email) LIKE LOWER(CONCAT('%', :kw, '%'))")
+    Page<User> searchByKeyword(@Param("kw") String keyword, Pageable pageable);
 
     /**
      * role 별 회원 수. 7-G 라운드 4 "마지막 ADMIN 강등 방지" 불변식.

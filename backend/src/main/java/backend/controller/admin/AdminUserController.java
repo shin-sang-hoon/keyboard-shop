@@ -19,12 +19,15 @@ import org.springframework.web.bind.annotation.*;
  * 별도 @PreAuthorize 불필요 (AdminAuditLogController 와 동일 패턴).
  *
  * Endpoints:
- *   GET   /api/admin/users                 — 회원 목록 (페이징 + Provider/Status 필터)
+ *   GET   /api/admin/users                 — 회원 목록 (페이징 + 검색/Provider/Status 필터)
+ *   GET   /api/admin/users/{id}            — 회원 상세 (V23, 수정 화면 초기값)
+ *   PATCH /api/admin/users/{id}            — 회원 정보 수정 (V23, 이름/닉/휴대폰/주소/메모)
  *   PATCH /api/admin/users/{id}/role       — 회원 role 변경 (USER <-> ADMIN)
  *   PATCH /api/admin/users/{id}/suspend    — 회원 정지 (7-H, body: reason)
  *   PATCH /api/admin/users/{id}/unsuspend  — 정지 해제 (7-H)
  *
  * 필터 파라미터 (목록, 모두 선택):
+ *   keyword  : 이름/이메일 부분일치 검색 (있으면 최우선, status·provider 무시)
  *   provider : LOCAL / KAKAO              (생략 시 전체)
  *   status   : ACTIVE / SUSPENDED / WITHDRAWN  (생략 시 전체)
  *   page     : 0-indexed (기본 0)
@@ -39,8 +42,11 @@ public class AdminUserController {
     private final AdminUserService adminUserService;
 
     @GetMapping
-    @Operation(summary = "회원 목록 (페이징 + Provider/Status 필터)")
+    @Operation(summary = "회원 목록 (페이징 + 검색/Provider/Status 필터)")
     public ResponseEntity<PagedResponse<UserDto.ListItem>> list(
+            @Parameter(description = "검색어 (이름/이메일 부분일치, 최우선 필터)")
+            @RequestParam(required = false) String keyword,
+
             @Parameter(description = "Provider 필터 (LOCAL / KAKAO)")
             @RequestParam(required = false) String provider,
 
@@ -53,7 +59,23 @@ public class AdminUserController {
             @Parameter(description = "페이지 크기 (1~100)")
             @RequestParam(defaultValue = "20") int size
     ) {
-        return ResponseEntity.ok(adminUserService.list(provider, status, page, size));
+        return ResponseEntity.ok(adminUserService.list(keyword, provider, status, page, size));
+    }
+
+    @GetMapping("/{id}")
+    @Operation(summary = "회원 상세 (V23, 수정 화면 초기값)")
+    public ResponseEntity<UserDto.Detail> getDetail(@PathVariable Long id) {
+        return ResponseEntity.ok(adminUserService.getDetail(id));
+    }
+
+    @PatchMapping("/{id}")
+    @Operation(summary = "회원 정보 수정 (V23, 이름/닉네임/휴대폰/주소/메모 + 선택적 비번 재설정)")
+    public ResponseEntity<UserDto.Detail> updateByAdmin(
+            @PathVariable Long id,
+            @RequestBody UserDto.AdminUserUpdateRequest req
+    ) {
+        UserDto.Detail updated = adminUserService.updateByAdmin(id, req);
+        return ResponseEntity.ok(updated);
     }
 
     @PatchMapping("/{id}/role")

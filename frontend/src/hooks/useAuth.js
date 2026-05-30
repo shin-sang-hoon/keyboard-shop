@@ -47,7 +47,10 @@ export function useAuth() {
   async function login(email, password) {
     const response = await authApi.login(email, password);
     const data = unwrap(response);
-    const userInfo = { id: data.id, email: data.email, name: data.name, role: data.role };
+    const userInfo = {
+      id: data.id, email: data.email, name: data.name,
+      displayName: data.displayName || data.name, role: data.role,
+    };
 
     setAuth({
       accessToken: data.accessToken,
@@ -65,7 +68,10 @@ export function useAuth() {
   async function signup(payload) {
     const response = await authApi.signup(payload);
     const data = unwrap(response);
-    const userInfo = { id: data.id, email: data.email, name: data.name, role: data.role };
+    const userInfo = {
+      id: data.id, email: data.email, name: data.name,
+      displayName: data.displayName || data.name, role: data.role,
+    };
 
     setAuth({
       accessToken: data.accessToken,
@@ -92,8 +98,8 @@ export function useAuth() {
    *   - 그래도 useAuth 가 인증 상태 변경의 단일 진입점이라는 원칙은 유지
    *     (KakaoCallbackPage 가 authStore 직접 만지지 않게).
    */
-  function setSession({ id, accessToken, refreshToken, email, name, role }) {
-    const userInfo = { id, email, name, role };
+  function setSession({ id, accessToken, refreshToken, email, name, displayName, role }) {
+    const userInfo = { id, email, name, displayName: displayName || name, role };
     setAuth({ accessToken, refreshToken, user: userInfo });
     setUser(userInfo);
   }
@@ -112,8 +118,21 @@ export function useAuth() {
   async function refreshUser() {
     const response = await authApi.me();
     const data = unwrap(response);
-    setUser({ id: data.id, email: data.email, name: data.name, role: data.role });
+    setUser({
+      id: data.id, email: data.email, name: data.name,
+      displayName: data.displayName || data.name, role: data.role,
+    });
     return data;
+  }
+
+  /**
+   * 프로필 수정 후 store 의 user 일부 갱신 (V23).
+   * 토큰은 그대로, name/displayName 등만 최신화 — 헤더 닉네임 즉시 반영.
+   * @param {Object} patch - { name?, displayName?, ... } user 부분 갱신
+   */
+  function applyUser(patch) {
+    const current = useAuthStore.getState().user || {};
+    setUser({ ...current, ...patch });
   }
 
   /**
@@ -139,6 +158,7 @@ export function useAuth() {
     setSession,
     logout,
     refreshUser,
+    applyUser,
     withdraw,
   };
 }

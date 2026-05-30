@@ -89,15 +89,20 @@ export default function MyPage() {
         {/* 프로필 헤더 */}
         <div style={S.header}>
           <div>
-            <div style={S.name}>{user?.name || '회원'}</div>
+            <div style={S.name}>{user?.displayName || user?.name || '회원'}</div>
             <div style={S.email}>{user?.email}</div>
             {user?.role === 'ADMIN' && (
               <span style={S.adminBadge}>관리자</span>
             )}
           </div>
-          <button onClick={handleLogout} style={S.logoutBtn}>
-            로그아웃
-          </button>
+          <div style={S.headerActions}>
+            <button onClick={() => navigate('/mypage/edit')} style={S.editBtn}>
+              회원 정보 수정
+            </button>
+            <button onClick={handleLogout} style={S.logoutBtn}>
+              로그아웃
+            </button>
+          </div>
         </div>
 
         {/* 탭 */}
@@ -238,6 +243,23 @@ const S = {
     fontWeight: typography.fontWeight.semibold,
     borderRadius: radius.sm,
     letterSpacing: typography.letterSpacing.wide,
+  },
+  headerActions: {
+    display: 'flex',
+    gap: spacing[2],
+    flexShrink: 0,
+  },
+  editBtn: {
+    background: colors.textOnLight,
+    border: `1px solid ${colors.textOnLight}`,
+    color: colors.white,
+    padding: `${spacing[2]} ${spacing[4]}`,
+    borderRadius: radius.md,
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    whiteSpace: 'nowrap',
   },
   logoutBtn: {
     background: 'transparent',

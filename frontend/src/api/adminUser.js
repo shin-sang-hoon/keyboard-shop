@@ -2,6 +2,7 @@
 //
 // Phase 7-G 라운드 4 (2026-05-24) — 관리자 회원 관리 API.
 // 7-H 회원 관리 강화 (2026-05-30) — status 필터 + 정지/해제.
+// 회원정보 수정 (2026-05-30, V23) — 상세 조회 + 관리자 회원 수정.
 // 백엔드: AdminUserController.
 //
 // 권한: SecurityConfig 의 /api/admin/** hasRole("ADMIN") 일괄 가드.
@@ -71,6 +72,37 @@ export const adminUserApi = {
    */
   unsuspend: async (id) => {
     const res = await apiClient.patch(`/admin/users/${id}/unsuspend`);
+    return res.data;
+  },
+
+  /**
+   * GET /api/admin/users/{id} — 회원 상세 (V23, 수정 화면 초기값).
+   *
+   * @param {number} id - 대상 회원 id
+   * @returns UserDto.Detail
+   *   { id, email, name, nickname, phone, zipcode, address, addressDetail,
+   *     role, provider, status, adminMemo, createdAt, lastLoginAt,
+   *     withdrawnAt, suspendedAt, suspendReason }
+   */
+  getDetail: async (id) => {
+    const res = await apiClient.get(`/admin/users/${id}`);
+    return res.data;
+  },
+
+  /**
+   * PATCH /api/admin/users/{id} — 관리자 회원 정보 수정 (V23).
+   * 이름/닉네임/휴대폰/주소/관리자메모 + 선택적 비번 강제 재설정(LOCAL).
+   * 권한(role)·상태(정지/해제)는 별도 엔드포인트(updateRole/suspend/unsuspend) 사용.
+   *
+   * @param {number} id   - 대상 회원 id
+   * @param {Object} body - { name, nickname, phone, zipcode, address,
+   *                          addressDetail, adminMemo, newPassword? }
+   * @returns UserDto.Detail (수정 후)
+   *
+   * 백엔드 가드(400): 탈퇴 계정 수정 / 소셜 계정 비번 설정 / 짧은 비번 → 호출부 catch.
+   */
+  updateByAdmin: async (id, body) => {
+    const res = await apiClient.patch(`/admin/users/${id}`, body);
     return res.data;
   },
 };

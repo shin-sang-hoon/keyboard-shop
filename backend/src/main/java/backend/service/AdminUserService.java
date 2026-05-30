@@ -6,6 +6,7 @@ import backend.entity.User;
 import backend.exception.BusinessException;
 import backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -46,20 +47,30 @@ import org.springframework.transaction.annotation.Transactional;
 public class AdminUserService {
 
     private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder; // V23 — 관리자 강제 비번 재설정용
 
     /** 페이지 크기 상한 (DOS 가드 — AuditLog 뷰어와 동일 정책). */
     private static final int MAX_PAGE_SIZE = 100;
 
     /**
-     * 회원 목록 (페이징 + Provider/Status 필터).
+     * 회원 목록 (페이징 + 검색/Provider/Status 필터).
      *
+     * 필터 우선순위 (가장 구체적 → 일반):
+     *   (1) keyword 있으면  → 이름/이메일 검색 (status·provider 무시)
+     *   (2) status 있으면   → status 필터
+     *   (3) provider 있으면 → provider 필터
+     *   (4) 모두 없으면     → 전체
+     * 검색이 최우선인 이유: "특정 회원을 찾는다"는 의도가 분류 필터보다 구체적.
+     * 프론트도 검색 입력 시 필터 탭을 '전체'로 리셋해 의미 충돌을 없앰.
+     *
+     * @param keyword  이름/이메일 부분일치 검색어 / null·"" (검색 안 함)
      * @param provider "LOCAL" / "KAKAO" / null·"" (전체)
      * @param status   "ACTIVE" / "SUSPENDED" / "WITHDRAWN" / null·"" (전체)
      * @param page     0-indexed
      * @param size     1~100
      */
     @Transactional(readOnly = true)
-    public PagedResponse<UserDto.ListItem> list(String provider, String status, int page, int size) {
+    public PagedResponse<UserDto.ListItem> list(String keyword, String provider, String status, int page, int size) {
         int safeSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
         Pageable pageable = PageRequest.of(
                 Math.max(page, 0),
@@ -68,7 +79,9 @@ public class AdminUserService {
         );
 
         Page<User> result;
-        if (status != null && !status.isBlank()) {
+        if (keyword != null && !keyword.isBlank()) {
+            result = userRepository.searchByKeyword(keyword.trim(), pageable);
+        } else if (status != null && !status.isBlank()) {
             result = userRepository.findByStatus(parseStatus(status), pageable);
         } else if (provider != null && !provider.isBlank()) {
             result = userRepository.findByProvider(parseProvider(provider), pageable);
@@ -167,6 +180,81 @@ public class AdminUserService {
         user.unsuspend(); // 멱등: 이미 ACTIVE 면 메타만 NULL 보장.
 
         return UserDto.ListItem.from(user);
+    }
+
+    // ------------------------------------------------------------------------
+    // 회원 상세 / 관리자 수정 (V23, 회원정보 수정)
+    // ------------------------------------------------------------------------
+
+    /**
+     * 회원 상세 조회 (V23) — 관리자 회원 수정 화면 초기값.
+     * 프로필 전체 + 관리자 메모 + 가입일/최종접속 포함 (Detail DTO). 비밀번호 비노출.
+     */
+    @Transactional(readOnly = true)
+    public UserDto.Detail getDetail(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> BusinessException.notFound(
+                        "회원을 찾을 수 없습니다. id=" + userId));
+        return UserDto.Detail.from(user);
+    }
+
+    /**
+     * 관리자 회원 수정 (V23). 이름/닉네임/휴대폰/주소/관리자 메모 수정.
+     * 선택적으로 비밀번호 강제 재설정 (현재 비번 불요, LOCAL 계정만).
+     *
+     * 범위 한정: 권한(role)·상태(정지/탈퇴)는 여기서 다루지 않는다.
+     *   - role 변경  → updateRole()
+     *   - 정지/해제   → suspend()/unsuspend()
+     * 단일 책임 분리 — 이 메서드는 "프로필성" 필드만 책임진다.
+     *
+     * 가드:
+     *   - 탈퇴(WITHDRAWN) 계정 수정 차단 — 탈퇴 계정 정보 변경은 무의미.
+     *   - 비밀번호 재설정은 LOCAL 만 — KAKAO(소셜)는 비번 없음 → 400.
+     *
+     * @param userId 대상 회원 id
+     * @param req    수정 필드 (이름/닉/휴대폰/주소/메모 + 선택적 newPassword)
+     */
+    @Transactional
+    public UserDto.Detail updateByAdmin(Long userId, UserDto.AdminUserUpdateRequest req) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> BusinessException.notFound(
+                        "회원을 찾을 수 없습니다. id=" + userId));
+
+        // 가드: 탈퇴 계정은 정보 수정 대상이 아님.
+        if (user.isWithdrawn()) {
+            throw BusinessException.badRequest("탈퇴한 회원의 정보는 수정할 수 없습니다.");
+        }
+
+        // 이름 (관리자만 변경 가능 — 빈값이면 엔티티에서 무시)
+        user.changeName(req.name());
+
+        // 프로필 3종 (닉네임/휴대폰/주소) — 빈값은 엔티티에서 NULL 정규화
+        user.updateProfile(
+                req.nickname(),
+                req.phone(),
+                req.zipcode(),
+                req.address(),
+                req.addressDetail()
+        );
+
+        // 관리자 메모
+        user.updateAdminMemo(req.adminMemo());
+
+        // 선택적 비밀번호 강제 재설정 (LOCAL 만, 현재 비번 불요 = 관리자 권한)
+        String newPw = req.newPassword();
+        if (newPw != null && !newPw.isBlank()) {
+            if (user.isSocial() || user.getPassword() == null) {
+                throw BusinessException.badRequest(
+                        "소셜(카카오) 계정은 비밀번호를 설정할 수 없습니다.");
+            }
+            if (newPw.length() < 4) {
+                throw BusinessException.badRequest("비밀번호는 4자 이상이어야 합니다.");
+            }
+            user.changePassword(passwordEncoder.encode(newPw));
+        }
+
+        // dirty checking flush.
+        return UserDto.Detail.from(user);
     }
 
     // ─── 내부 파싱 헬퍼 ───────────────────────────────────────────

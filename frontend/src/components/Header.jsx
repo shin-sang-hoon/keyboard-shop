@@ -38,12 +38,14 @@ const NAV_ITEMS = [
 
 function displayName(user) {
   if (!user) return '';
+  // V23: 백엔드가 만들어 준 displayName("이름(닉네임)" 또는 "이름") 우선.
+  // 구버전 store(displayName 없음) 호환 위해 name 등으로 폴백.
   return (
+    user.displayName ||
     user.name ||
     user.userName ||
     user.username ||
     user.nickname ||
-    user.displayName ||
     user.fullName ||
     user.email?.split('@')[0] ||
     '회원'

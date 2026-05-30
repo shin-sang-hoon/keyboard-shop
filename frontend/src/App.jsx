@@ -22,6 +22,7 @@ import SignupPage from './pages/SignupPage';
 import JoinTypeChoicePage from './pages/JoinTypeChoicePage';
 import JoinAgreePage from './pages/JoinAgreePage';
 import MyPage from './pages/MyPage';
+import ProfileEditPage from './pages/ProfileEditPage';
 import PlaceholderPage from './pages/PlaceholderPage';
 import NoticeDetailPage from './pages/NoticeDetailPage';
 import KakaoCallbackPage from './pages/KakaoCallbackPage';
@@ -30,6 +31,7 @@ import AdminFlashDealPage from './pages/admin/AdminFlashDealPage';
 import AdminLayout from './components/admin/AdminLayout';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import AdminUserPage from './pages/admin/AdminUserPage';
+import AdminUserEditPage from './pages/admin/AdminUserEditPage';
 import AdminProductPage from './pages/admin/AdminProductPage';
 import AdminOrderPage from './pages/admin/AdminOrderPage';
 import AdminNoticePage from './pages/admin/AdminNoticePage';
@@ -116,6 +118,14 @@ function App() {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/mypage/edit"
+          element={
+            <ProtectedRoute>
+              <ProfileEditPage />
+            </ProtectedRoute>
+          }
+        />
 
         {/* Phase 7 [9-2B] - 감사 로그 뷰어 (ADMIN role 가드).
             ProtectedRoute 가 비로그인 시 /login 으로, role 검사로 ADMIN 만 통과. */}
@@ -131,6 +141,7 @@ function App() {
           <Route index element={<AdminDashboardPage />} />
           <Route path="dashboard" element={<AdminDashboardPage />} />
           <Route path="users" element={<AdminUserPage />} />
+          <Route path="users/:id/edit" element={<AdminUserEditPage />} />
           <Route path="products" element={<AdminProductPage />} />
           <Route path="orders" element={<AdminOrderPage />} />
           <Route path="notices" element={<AdminNoticePage />} />
