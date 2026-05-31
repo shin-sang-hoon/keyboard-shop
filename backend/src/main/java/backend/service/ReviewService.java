@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 리뷰 도메인 서비스 (5-H A6 + B2 + B5 + B6).
+ * 리뷰 도메인 서비스 (5-H A6 + B2 + B5 + B6, 마이페이지 getMyReviews).
  *
  * A6 create() 검증 4단계:
  *   1) OrderItem 존재? → 404
@@ -51,6 +51,10 @@ import java.util.Map;
  *   - getReviewsByProduct(productId, pageable, ReviewSort) 오버로드 추가
  *   - 기존 호출처는 LATEST 위임 (backward compatible)
  *   - Pageable 의 sort 는 무시하고 enum.toSort() 로 덮어씀 (enum 이 단일 진실 소스)
+ *
+ * 마이페이지:
+ *   - getMyReviews(email): 본인이 작성한 리뷰 전체 (숨김 포함) — 상품명/이미지 동반.
+ *     readOnly tx 안에서 product fetch join → MyReviewItem.from 매핑 (LAZY 안전).
  */
 @Service
 @RequiredArgsConstructor
@@ -102,6 +106,21 @@ public class ReviewService {
                 .findByProductId(productId, sortedPageable)
                 .map(ReviewDto.Response::from);
         return PagedResponse.from(page);
+    }
+
+    /**
+     * 마이페이지 "작성한 리뷰" — 본인 리뷰 전체 (숨김 포함, 최신순).
+     *
+     * findByUserIdWithProduct 가 product 를 fetch join 하므로 MyReviewItem.from 에서
+     * product.getName()/getImageUrl() 접근이 LAZY 예외 없이 안전 (readOnly tx 내 매핑).
+     * 단순 List 반환 — 주문(getMyOrders)과 동일하게 마이페이지는 페이징 없이 전량 노출.
+     */
+    public List<ReviewDto.MyReviewItem> getMyReviews(String currentUserEmail) {
+        User currentUser = findUserByEmail(currentUserEmail);
+        return reviewRepository.findByUserIdWithProduct(currentUser.getId())
+                .stream()
+                .map(ReviewDto.MyReviewItem::from)
+                .toList();
     }
 
     // ─────────────────────────────────────────────────────

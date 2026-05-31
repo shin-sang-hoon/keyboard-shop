@@ -1,36 +1,73 @@
 // frontend/src/pages/MyPage.jsx
 //
-// 5-B 마이페이지 골격 (LIGHT 톤).
+// 마이페이지 (LIGHT 톤) — ② 3탭 실데이터 + role 분기 (5/30).
 //
-// 동작:
-// - 헤더: 이름 + 이메일 + 로그아웃 버튼
-// - 탭 3개: 주문내역 / 찜한 상품 / 작성한 리뷰
-// - 각 탭은 placeholder (5-D 주문, 5-H 찜/리뷰 작업 시 본격 구현)
-// - 로그아웃 시 store 비우고 /products로 이동
+// role 분기:
+//   - 일반 사용자(USER): 주문내역 / 찜한 상품 / 작성한 리뷰  (3탭)
+//   - 관리자(ADMIN)    : 답변한 리뷰  (1탭) — 주문/찜은 관리자 계정과 무관하므로 숨김
+//       · 관리자가 고객 리뷰에 단 "판매자 답변" 목록을 모아 보여줌 (R10 my-replies 활용)
 //
-// 회원 탈퇴 (5/29):
-// - 하단 "회원 탈퇴" 영역 → 확인 모달.
-// - 모달: 비밀번호 입력(LOCAL 재인증) + 안내. 백엔드가 provider 로 분기하므로
-//   KAKAO 유저는 비번을 비워도 됨(안내문 표기).
-// - 성공 시 useAuth.withdraw() 가 store 를 비움 → /products 로 이동.
+// 데이터 소스:
+//   - 주문    GET /api/orders/my          (List<OrderDto.Response>)        api/order.js
+//   - 찜      GET /api/wishlist            (PagedResponse<WishlistDto.Item>) api/wishlist.js
+//   - 내 리뷰  GET /api/reviews/my          (List<ReviewDto.MyReviewItem>)   api/review.js
+//   - 답변리뷰 GET /api/admin/reviews/my-replies (PagedResponse<ListItem>)   api/adminReview.js
 //
+// 각 탭은 최초 진입 시 lazy fetch + 캐시(한 번 불러오면 재요청 안 함). 로딩/빈/에러 상태 처리.
+//
+// 회원 정보 수정 / 로그아웃 / 회원 탈퇴 영역은 기존 그대로 보존.
 // 보호: ProtectedRoute로 감싸져 있어서 비로그인 진입 불가.
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { colors, typography, spacing, radius } from '../styles/tokens';
+import { getMyOrders } from '../api/order';
+import { getMyWishlist, toggleWishlist } from '../api/wishlist';
+import { getMyReviews, deleteMyReview } from '../api/review';
+import { adminReviewApi } from '../api/adminReview';
 
-const TABS = [
-  { id: 'orders', label: '주문내역', plannedPhase: '5-D 장바구니/주문' },
-  { id: 'wishlist', label: '찜한 상품', plannedPhase: '5-H 도메인 확장' },
-  { id: 'reviews', label: '작성한 리뷰', plannedPhase: '5-H 도메인 확장' },
-];
+// ─── 주문 상태 한글 라벨 ───────────────────────────────────────────────
+const ORDER_STATUS_LABEL = {
+  PENDING: '결제 대기',
+  PAID: '결제 완료',
+  PREPARING: '배송 준비',
+  SHIPPED: '배송 중',
+  DELIVERED: '배송 완료',
+  CANCELLED: '취소됨',
+};
+
+function formatPrice(v) {
+  if (v == null) return '-';
+  return `${Number(v).toLocaleString()}원`;
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}.${mm}.${dd}`;
+}
 
 export default function MyPage() {
   const { user, logout, withdraw } = useAuth();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('orders');
+
+  const isAdmin = user?.role === 'ADMIN';
+
+  // role 에 따라 탭 구성이 달라짐
+  const TABS = isAdmin
+    ? [{ id: 'replies', label: '답변한 리뷰' }]
+    : [
+        { id: 'orders', label: '주문내역' },
+        { id: 'wishlist', label: '찜한 상품' },
+        { id: 'reviews', label: '작성한 리뷰' },
+      ];
+
+  const [activeTab, setActiveTab] = useState(TABS[0].id);
 
   // 회원 탈퇴 모달 상태
   const [showWithdraw, setShowWithdraw] = useState(false);
@@ -61,7 +98,6 @@ export default function MyPage() {
     setError('');
     try {
       await withdraw({ password: pw, reason });
-      // 성공 — store 비워짐. 안내 후 홈으로.
       setShowWithdraw(false);
       navigate('/products', { replace: true });
     } catch (err) {
@@ -81,8 +117,6 @@ export default function MyPage() {
     }
   }
 
-  const currentTab = TABS.find((t) => t.id === activeTab);
-
   return (
     <div style={S.page}>
       <div style={S.container}>
@@ -91,9 +125,7 @@ export default function MyPage() {
           <div>
             <div style={S.name}>{user?.displayName || user?.name || '회원'}</div>
             <div style={S.email}>{user?.email}</div>
-            {user?.role === 'ADMIN' && (
-              <span style={S.adminBadge}>관리자</span>
-            )}
+            {isAdmin && <span style={S.adminBadge}>관리자</span>}
           </div>
           <div style={S.headerActions}>
             <button onClick={() => navigate('/mypage/edit')} style={S.editBtn}>
@@ -121,15 +153,12 @@ export default function MyPage() {
           ))}
         </div>
 
-        {/* 탭 내용 (placeholder) */}
+        {/* 탭 내용 */}
         <div style={S.tabContent}>
-          <div style={S.placeholder}>
-            <div style={S.placeholderIcon}>📋</div>
-            <h3 style={S.placeholderTitle}>{currentTab.label}</h3>
-            <p style={S.placeholderText}>
-              {currentTab.plannedPhase} 단계에서 구현 예정입니다
-            </p>
-          </div>
+          {activeTab === 'orders' && <OrdersTab />}
+          {activeTab === 'wishlist' && <WishlistTab />}
+          {activeTab === 'reviews' && <ReviewsTab />}
+          {activeTab === 'replies' && <RepliesTab />}
         </div>
 
         {/* 회원 탈퇴 영역 */}
@@ -197,6 +226,332 @@ export default function MyPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// 공용 — 상태 박스 (로딩/빈/에러)
+// ═════════════════════════════════════════════════════════════════════
+
+function StatusBox({ icon, title, sub }) {
+  return (
+    <div style={S.placeholder}>
+      {icon && <div style={S.placeholderIcon}>{icon}</div>}
+      <h3 style={S.placeholderTitle}>{title}</h3>
+      {sub && <p style={S.placeholderText}>{sub}</p>}
+    </div>
+  );
+}
+
+// 데이터 페치 + 로딩/에러/빈 처리를 공통화한 커스텀 훅.
+//
+// 무한루프 방지: 호출부가 () => getMyWishlist({size:100}) 같은 "인라인 화살표 함수"를
+// 넘기면 매 렌더마다 fetcher 참조가 바뀐다. fetcher 를 useEffect/useCallback 의존성에
+// 그대로 넣으면 (fetch→setState→리렌더→새 fetcher→다시 fetch) 무한 루프가 된다.
+// → fetcher 를 ref 에 담아 항상 최신 함수를 가리키되, effect 의존성에서는 제외한다.
+//   effect 는 마운트 시 1회만 실행(빈 deps) → 탭 진입 시 한 번만 로드.
+function useTabData(fetcher) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [data, setData] = useState(null);
+
+  // 최신 fetcher 를 ref 로 유지 (참조 변경이 effect 를 재실행시키지 않도록)
+  const fetcherRef = useRef(fetcher);
+  fetcherRef.current = fetcher;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await fetcherRef.current();
+      setData(result);
+    } catch (err) {
+      console.error('[MyPage] tab fetch error:', err);
+      setError(err?.response?.data?.message || '불러오지 못했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  }, []); // fetcher 는 ref 로 접근 → deps 비움 (load 참조 고정)
+
+  useEffect(() => {
+    load();
+  }, [load]); // load 가 고정이라 마운트 시 1회만 실행
+
+  return { loading, error, data, reload: load, setData };
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// 주문내역 탭
+// ═════════════════════════════════════════════════════════════════════
+
+function OrdersTab() {
+  const { loading, error, data } = useTabData(getMyOrders);
+
+  if (loading) return <StatusBox title="주문내역을 불러오는 중..." />;
+  if (error) return <StatusBox icon="⚠️" title="주문내역" sub={error} />;
+  if (!data || data.length === 0)
+    return <StatusBox icon="📦" title="주문 내역이 없습니다" sub="첫 주문을 기다리고 있어요" />;
+
+  return (
+    <div style={S.list}>
+      {data.map((order) => (
+        <div key={order.id} style={S.orderCard}>
+          <div style={S.orderHead}>
+            <span style={S.orderDate}>{formatDate(order.createdAt)}</span>
+            <span style={S.orderStatus}>
+              {ORDER_STATUS_LABEL[order.status] || order.status}
+            </span>
+          </div>
+          <div style={S.orderItems}>
+            {(order.items || []).map((it, idx) => (
+              <div key={idx} style={S.orderItemRow}>
+                <span style={S.orderItemName}>{it.productName}</span>
+                <span style={S.orderItemQty}>
+                  {formatPrice(it.price)} · {it.quantity}개
+                </span>
+              </div>
+            ))}
+          </div>
+          <div style={S.orderFoot}>
+            <span style={S.orderTotalLabel}>합계</span>
+            <span style={S.orderTotal}>{formatPrice(order.totalPrice)}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// 찜한 상품 탭
+// ═════════════════════════════════════════════════════════════════════
+
+function WishlistTab() {
+  const navigate = useNavigate();
+  const { loading, error, data, setData } = useTabData(() => getMyWishlist({ size: 100 }));
+  const [busyId, setBusyId] = useState(null);
+
+  const items = data?.content || [];
+
+  async function handleRemove(productId) {
+    setBusyId(productId);
+    try {
+      await toggleWishlist(productId); // 이미 찜 상태 → 해제
+      // 로컬에서 제거 (재요청 없이 즉시 반영)
+      setData((prev) => ({
+        ...prev,
+        content: (prev?.content || []).filter((x) => x.productId !== productId),
+      }));
+    } catch (err) {
+      console.error('[MyPage] wishlist remove error:', err);
+      window.alert('찜 해제에 실패했습니다.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (loading) return <StatusBox title="찜한 상품을 불러오는 중..." />;
+  if (error) return <StatusBox icon="⚠️" title="찜한 상품" sub={error} />;
+  if (items.length === 0)
+    return <StatusBox icon="🤍" title="찜한 상품이 없습니다" sub="마음에 드는 상품을 찜해보세요" />;
+
+  return (
+    <div style={S.wishGrid}>
+      {items.map((it) => (
+        <div key={it.wishlistId} style={S.wishCard}>
+          <div
+            style={S.wishThumb}
+            onClick={() => navigate(`/products/${it.productId}`)}
+            role="button"
+          >
+            {it.imageUrl ? (
+              <img src={it.imageUrl} alt={it.productName} style={S.wishImg} />
+            ) : (
+              <div style={S.wishNoImg}>이미지 없음</div>
+            )}
+          </div>
+          <div style={S.wishBody}>
+            {it.brandName && <div style={S.wishBrand}>{it.brandName}</div>}
+            <div
+              style={S.wishName}
+              onClick={() => navigate(`/products/${it.productId}`)}
+              role="button"
+            >
+              {it.productName}
+            </div>
+            <div style={S.wishPrice}>{formatPrice(it.price)}</div>
+          </div>
+          <button
+            onClick={() => handleRemove(it.productId)}
+            disabled={busyId === it.productId}
+            style={S.wishRemoveBtn}
+          >
+            {busyId === it.productId ? '해제 중…' : '찜 해제'}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// 작성한 리뷰 탭 (일반 사용자)
+// ═════════════════════════════════════════════════════════════════════
+
+function ReviewsTab() {
+  const navigate = useNavigate();
+  const { loading, error, data, setData } = useTabData(getMyReviews);
+  const [busyId, setBusyId] = useState(null);
+
+  async function handleDelete(reviewId) {
+    if (!window.confirm('이 리뷰를 삭제할까요?')) return;
+    setBusyId(reviewId);
+    try {
+      await deleteMyReview(reviewId);
+      setData((prev) => (prev || []).filter((r) => r.reviewId !== reviewId));
+    } catch (err) {
+      console.error('[MyPage] review delete error:', err);
+      window.alert('리뷰 삭제에 실패했습니다.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (loading) return <StatusBox title="작성한 리뷰를 불러오는 중..." />;
+  if (error) return <StatusBox icon="⚠️" title="작성한 리뷰" sub={error} />;
+  if (!data || data.length === 0)
+    return <StatusBox icon="✍️" title="작성한 리뷰가 없습니다" sub="구매한 상품에 리뷰를 남겨보세요" />;
+
+  return (
+    <div style={S.list}>
+      {data.map((rv) => (
+        <div key={rv.reviewId} style={S.reviewCard}>
+          <div style={S.reviewTop}>
+            <div
+              style={S.reviewThumb}
+              onClick={() => navigate(`/products/${rv.productId}`)}
+              role="button"
+            >
+              {rv.productImageUrl ? (
+                <img src={rv.productImageUrl} alt={rv.productName} style={S.reviewImg} />
+              ) : (
+                <div style={S.reviewNoImg}>—</div>
+              )}
+            </div>
+            <div style={S.reviewMain}>
+              <div
+                style={S.reviewProductName}
+                onClick={() => navigate(`/products/${rv.productId}`)}
+                role="button"
+              >
+                {rv.productName}
+              </div>
+              <div style={S.reviewMeta}>
+                <Stars rating={rv.rating} />
+                <span style={S.reviewDate}>{formatDate(rv.createdAt)}</span>
+                {rv.hidden && <span style={S.hiddenBadge}>관리자 숨김</span>}
+              </div>
+              {rv.content && <p style={S.reviewContent}>{rv.content}</p>}
+            </div>
+            <button
+              onClick={() => handleDelete(rv.reviewId)}
+              disabled={busyId === rv.reviewId}
+              style={S.reviewDeleteBtn}
+            >
+              {busyId === rv.reviewId ? '삭제 중…' : '삭제'}
+            </button>
+          </div>
+
+          {/* 판매자 답변이 달렸으면 함께 표시 */}
+          {rv.hasReply && (
+            <div style={S.sellerReply}>
+              <div style={S.sellerReplyHead}>
+                <span style={S.sellerReplyBadge}>판매자</span>
+                <span style={S.sellerReplyName}>{rv.repliedByName || '판매자'}</span>
+                {rv.repliedAt && (
+                  <span style={S.sellerReplyDate}>· {formatDate(rv.repliedAt)}</span>
+                )}
+              </div>
+              <p style={S.sellerReplyContent}>{rv.reply}</p>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// 답변한 리뷰 탭 (관리자)
+// ═════════════════════════════════════════════════════════════════════
+
+function RepliesTab() {
+  const navigate = useNavigate();
+  const { loading, error, data } = useTabData(() =>
+    adminReviewApi.getMyReplies({ size: 100 })
+  );
+
+  const items = data?.content || [];
+
+  if (loading) return <StatusBox title="답변한 리뷰를 불러오는 중..." />;
+  if (error) return <StatusBox icon="⚠️" title="답변한 리뷰" sub={error} />;
+  if (items.length === 0)
+    return (
+      <StatusBox
+        icon="💬"
+        title="답변한 리뷰가 없습니다"
+        sub="고객 리뷰에 판매자 답변을 달면 여기에 모입니다"
+      />
+    );
+
+  return (
+    <div style={S.list}>
+      <p style={S.adminHint}>
+        고객 리뷰에 남긴 판매자 답변 목록입니다. 답변 수정·삭제는 상품 상세 또는 리뷰·Q&A 운영에서 가능합니다.
+      </p>
+      {items.map((rv) => (
+        <div key={rv.id} style={S.reviewCard}>
+          <div
+            style={S.reviewProductName}
+            onClick={() => navigate(`/products/${rv.productId}`)}
+            role="button"
+          >
+            {rv.productName}
+          </div>
+          <div style={S.reviewMeta}>
+            <Stars rating={rv.rating} />
+            <span style={S.reviewDate}>{rv.userName} 님의 리뷰</span>
+            {rv.hidden && <span style={S.hiddenBadge}>숨김</span>}
+          </div>
+          {rv.content && <p style={S.reviewContent}>{rv.content}</p>}
+
+          {/* 내가 단 답변 */}
+          <div style={S.sellerReply}>
+            <div style={S.sellerReplyHead}>
+              <span style={S.sellerReplyBadge}>판매자</span>
+              <span style={S.sellerReplyName}>{rv.repliedByName || '판매자'}</span>
+              {rv.repliedAt && (
+                <span style={S.sellerReplyDate}>· {formatDate(rv.repliedAt)}</span>
+              )}
+            </div>
+            <p style={S.sellerReplyContent}>{rv.reply}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── 별점 렌더 ──────────────────────────────────────────────────────────
+function Stars({ rating = 0 }) {
+  return (
+    <span style={S.stars} aria-label={`별점 ${rating} / 5`}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <span key={n} style={{ color: rating >= n ? '#fbbf24' : '#e4e4e7' }}>
+          ★
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -302,13 +657,13 @@ const S = {
     background: colors.white,
     border: `1px solid ${colors.borderLight}`,
     borderRadius: radius.lg,
-    padding: spacing[8],
+    padding: spacing[6],
     minHeight: 280,
     boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)',
   },
   placeholder: {
     textAlign: 'center',
-    padding: `${spacing[6]} ${spacing[4]}`,
+    padding: `${spacing[8]} ${spacing[4]}`,
   },
   placeholderIcon: {
     fontSize: 48,
@@ -325,6 +680,280 @@ const S = {
     fontSize: typography.fontSize.sm,
     color: '#94a3b8',
     margin: 0,
+  },
+
+  // === 공용 리스트 ===
+  list: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: spacing[3],
+  },
+  adminHint: {
+    fontSize: typography.fontSize.sm,
+    color: colors.textOnLightDim,
+    background: colors.surfaceMuted,
+    padding: spacing[3],
+    borderRadius: radius.md,
+    margin: 0,
+    marginBottom: spacing[2],
+  },
+
+  // === 주문 카드 ===
+  orderCard: {
+    border: `1px solid ${colors.borderLight}`,
+    borderRadius: radius.md,
+    padding: spacing[4],
+  },
+  orderHead: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing[3],
+    paddingBottom: spacing[2],
+    borderBottom: `1px solid ${colors.borderLight}`,
+  },
+  orderDate: {
+    fontSize: typography.fontSize.sm,
+    color: colors.textOnLightDim,
+    fontWeight: typography.fontWeight.medium,
+  },
+  orderStatus: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: typography.fontWeight.semibold,
+    color: colors.textOnLight,
+    background: colors.surfaceMuted,
+    padding: `2px ${spacing[2]}`,
+    borderRadius: radius.sm,
+  },
+  orderItems: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: spacing[2],
+    marginBottom: spacing[3],
+  },
+  orderItemRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    fontSize: typography.fontSize.sm,
+  },
+  orderItemName: {
+    color: colors.textOnLight,
+  },
+  orderItemQty: {
+    color: colors.textOnLightDim,
+    flexShrink: 0,
+    marginLeft: spacing[3],
+  },
+  orderFoot: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: spacing[2],
+    borderTop: `1px solid ${colors.borderLight}`,
+  },
+  orderTotalLabel: {
+    fontSize: typography.fontSize.sm,
+    color: colors.textOnLightDim,
+  },
+  orderTotal: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: colors.textOnLight,
+  },
+
+  // === 찜 그리드 ===
+  wishGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+    gap: spacing[4],
+  },
+  wishCard: {
+    border: `1px solid ${colors.borderLight}`,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  wishThumb: {
+    aspectRatio: '1 / 1',
+    background: colors.surfaceMuted,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  wishImg: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+  },
+  wishNoImg: {
+    fontSize: typography.fontSize.xs,
+    color: '#94a3b8',
+  },
+  wishBody: {
+    padding: spacing[3],
+    flex: 1,
+  },
+  wishBrand: {
+    fontSize: typography.fontSize.xs,
+    color: colors.textOnLightDim,
+    marginBottom: spacing[1],
+  },
+  wishName: {
+    fontSize: typography.fontSize.sm,
+    color: colors.textOnLight,
+    cursor: 'pointer',
+    lineHeight: 1.4,
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+  },
+  wishPrice: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold,
+    color: colors.textOnLight,
+    marginTop: spacing[2],
+  },
+  wishRemoveBtn: {
+    border: 'none',
+    borderTop: `1px solid ${colors.borderLight}`,
+    background: colors.white,
+    color: colors.textOnLightDim,
+    padding: spacing[3],
+    fontSize: typography.fontSize.sm,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+
+  // === 리뷰 카드 ===
+  reviewCard: {
+    border: `1px solid ${colors.borderLight}`,
+    borderRadius: radius.md,
+    padding: spacing[4],
+  },
+  reviewTop: {
+    display: 'flex',
+    gap: spacing[3],
+    alignItems: 'flex-start',
+  },
+  reviewThumb: {
+    width: 64,
+    height: 64,
+    borderRadius: radius.sm,
+    background: colors.surfaceMuted,
+    flexShrink: 0,
+    cursor: 'pointer',
+    overflow: 'hidden',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reviewImg: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+  },
+  reviewNoImg: {
+    color: '#cbd5e1',
+  },
+  reviewMain: {
+    flex: 1,
+    minWidth: 0,
+  },
+  reviewProductName: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.semibold,
+    color: colors.textOnLight,
+    cursor: 'pointer',
+    marginBottom: spacing[1],
+  },
+  reviewMeta: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: spacing[2],
+    marginBottom: spacing[2],
+    flexWrap: 'wrap',
+  },
+  reviewDate: {
+    fontSize: typography.fontSize.xs,
+    color: colors.textOnLightDim,
+  },
+  hiddenBadge: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: typography.fontWeight.semibold,
+    color: '#dc2626',
+    background: '#fef2f2',
+    border: '1px solid #fecaca',
+    borderRadius: radius.sm,
+    padding: `1px ${spacing[2]}`,
+  },
+  reviewContent: {
+    fontSize: typography.fontSize.sm,
+    color: colors.textOnLight,
+    lineHeight: 1.6,
+    margin: 0,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  },
+  reviewDeleteBtn: {
+    border: `1px solid ${colors.borderLight}`,
+    background: colors.white,
+    color: colors.textOnLightDim,
+    padding: `${spacing[1]} ${spacing[3]}`,
+    borderRadius: radius.sm,
+    fontSize: typography.fontSize.xs,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    flexShrink: 0,
+  },
+
+  // === 판매자 답변 (리뷰 카드 내부) ===
+  sellerReply: {
+    marginTop: spacing[3],
+    marginLeft: spacing[4],
+    padding: spacing[3],
+    background: colors.surfaceMuted,
+    borderLeft: `3px solid ${colors.textOnLight}`,
+    borderRadius: radius.sm,
+  },
+  sellerReplyHead: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: spacing[2],
+    marginBottom: spacing[1],
+  },
+  sellerReplyBadge: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: typography.fontWeight.bold,
+    color: colors.white,
+    background: colors.textOnLight,
+    borderRadius: radius.sm,
+    padding: `1px ${spacing[2]}`,
+  },
+  sellerReplyName: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: typography.fontWeight.semibold,
+    color: colors.textOnLight,
+  },
+  sellerReplyDate: {
+    fontSize: typography.fontSize.xs,
+    color: colors.textOnLightDim,
+  },
+  sellerReplyContent: {
+    fontSize: typography.fontSize.sm,
+    color: colors.textOnLight,
+    lineHeight: 1.6,
+    margin: 0,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  },
+
+  stars: {
+    display: 'inline-flex',
+    fontSize: typography.fontSize.sm,
+    letterSpacing: '1px',
   },
 
   // === 회원 탈퇴 영역 ===

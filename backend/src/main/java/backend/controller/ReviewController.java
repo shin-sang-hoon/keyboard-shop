@@ -15,19 +15,22 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 /**
- * 리뷰 컨트롤러 (5-H B2 + B5 + B6).
+ * 리뷰 컨트롤러 (5-H B2 + B5 + B6, 마이페이지 GET /my).
  *
  * 라우트 구조:
  *   - GET    /api/products/{id}/reviews         : 상품별 리뷰 목록 (공개, PagedResponse)
  *   - GET    /api/products/{id}/reviews/stats   : 별점 분포 통계 (공개) — B5 신규
+ *   - GET    /api/reviews/my                    : 내가 작성한 리뷰 (인증) — 마이페이지 신규
  *   - POST   /api/reviews                       : 리뷰 작성 (인증)
  *   - PATCH  /api/reviews/{id}                  : 리뷰 수정 (본인)
  *   - DELETE /api/reviews/{id}                  : 리뷰 삭제 (본인 또는 ADMIN)
  *
  * SecurityConfig:
  *   - GET /api/products/** → permitAll (목록 + stats 둘 다 통과)
- *   - /api/reviews/**     → authenticated
+ *   - /api/reviews/**     → authenticated  (→ /my 도 자동으로 인증 필요, 별도 설정 불필요)
  *
  * 5/3 변경: getProductReviews 반환 타입 Page → PagedResponse (PageImpl 직렬화 WARN 청산).
  *
@@ -87,6 +90,19 @@ public class ReviewController {
     @Operation(summary = "별점 분포 통계 (1★~5★ 카운트 + 평균 + 총 개수)")
     public ResponseEntity<ReviewStatsDto> getReviewStats(@PathVariable Long productId) {
         return ResponseEntity.ok(reviewService.getReviewStats(productId));
+    }
+
+    /**
+     * 마이페이지 — 내가 작성한 리뷰 목록 (인증).
+     *
+     * 본인 리뷰 전체 (숨김 포함, 최신순). 상품명·이미지 동반(MyReviewItem).
+     * /api/reviews/** 가 SecurityConfig 에서 authenticated 라 자동으로 인증 필요.
+     * 페이징 없이 단순 List — 주문(GET /api/orders/my)과 동일하게 마이페이지는 전량 노출.
+     */
+    @GetMapping("/api/reviews/my")
+    @Operation(summary = "내가 작성한 리뷰 목록 (마이페이지)")
+    public ResponseEntity<List<ReviewDto.MyReviewItem>> getMyReviews(Authentication auth) {
+        return ResponseEntity.ok(reviewService.getMyReviews(auth.getName()));
     }
 
     /** 리뷰 작성 — 본인 주문의 배송 완료 상품만 (검증 4단계) */

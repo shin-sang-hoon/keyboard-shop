@@ -21,6 +21,7 @@ import java.util.Optional;
  *  - B5 stats: findRatingDistributionByProductId
  *  - 7-G R8: findForAdmin(관리자 목록), countByHiddenTrue(숨김 카운트)
  *  - R10: findRepliedByAdmin(관리자가 답변한 리뷰 — 마이페이지 관리자 탭)
+ *  - 마이페이지: findByUserIdWithProduct(내가 쓴 리뷰 — product fetch join)
  *
  * ── 7-G R8 hidden 정책 ──────────────────────────────────────────────
  *  관리자가 숨긴 리뷰(hidden=true)는 "공개"로 노출되는 모든 경로에서 제외돼야 함.
@@ -59,6 +60,23 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
 
     /** 마이페이지 — 사용자 본인 리뷰 전체 (숨김 포함 — 본인은 볼 수 있어야 함) */
     List<Review> findByUserId(Long userId);
+
+    /**
+     * 마이페이지 "작성한 리뷰" — 본인 리뷰 + product JOIN FETCH (N+1 차단).
+     *
+     * findByUserId(위)는 product 가 LAZY 라 DTO 에서 product.name/imageUrl 접근 시
+     * 리뷰 N건마다 추가 쿼리(N+1) 발생. 마이페이지 카드는 상품명·이미지를 보여줘야 하므로
+     * product 를 fetch join 으로 미리 로드.
+     *
+     * 숨김(hidden) 포함 — 작성자 본인은 자기가 쓴 숨겨진 리뷰도 볼 수 있어야 함
+     * (관리자가 숨긴 리뷰라도 "내가 쓴 글" 목록에는 보이는 게 자연스러움).
+     * 정렬: 작성 최신순. user 는 WHERE 조건(본인)이라 fetch 불필요.
+     */
+    @Query("SELECT r FROM Review r " +
+           "JOIN FETCH r.product " +
+           "WHERE r.user.id = :userId " +
+           "ORDER BY r.createdAt DESC")
+    List<Review> findByUserIdWithProduct(@Param("userId") Long userId);
 
     /** 상품 카드 표시용 카운트 — 공개 리뷰만 */
     @Query("SELECT COUNT(r) FROM Review r " +
