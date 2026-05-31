@@ -305,6 +305,13 @@ function OrdersTab() {
           <div style={S.orderItems}>
             {(order.items || []).map((it, idx) => (
               <div key={idx} style={S.orderItemRow}>
+                <div style={S.orderItemThumb}>
+                  {it.productImage ? (
+                    <img src={it.productImage} alt={it.productName} style={S.orderItemImg} />
+                  ) : (
+                    <div style={S.orderItemNoImg}>📦</div>
+                  )}
+                </div>
                 <span style={S.orderItemName}>{it.productName}</span>
                 <span style={S.orderItemQty}>
                   {formatPrice(it.price)} · {it.quantity}개
@@ -733,11 +740,37 @@ const S = {
   },
   orderItemRow: {
     display: 'flex',
-    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: spacing[3],
     fontSize: typography.fontSize.sm,
+  },
+  orderItemThumb: {
+    width: 44,
+    height: 44,
+    flexShrink: 0,
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+    border: `1px solid ${colors.borderLight}`,
+    background: colors.white,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  orderItemImg: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+  },
+  orderItemNoImg: {
+    fontSize: 18,
   },
   orderItemName: {
     color: colors.textOnLight,
+    flex: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   orderItemQty: {
     color: colors.textOnLightDim,

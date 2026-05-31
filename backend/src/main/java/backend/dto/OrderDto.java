@@ -31,6 +31,7 @@ public class OrderDto {
     public static class OrderItemResponse {
         private Long productId;
         private String productName;
+        private String productImage;   // 상품 대표 이미지 URL (마이페이지 주문내역 썸네일용)
         private Integer price;
         private Integer quantity;
     }

@@ -6,11 +6,28 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import java.util.List;
 
 public interface OrderRepository extends JpaRepository<Order, Long> {
     List<Order> findByUser(User user);
     List<Order> findByUserOrderByCreatedAtDesc(User user);
+
+    /**
+     * 마이페이지 주문내역 — items + 각 item 의 product 까지 한 번에 fetch (N+1 방어).
+     *
+     * getMyOrders 는 페이징 없는 List 라서 컬렉션 fetch join 을 안전하게 쓸 수 있다
+     * (페이징과 함께 쓰면 HHH90003004 메모리 페이징 경고가 뜨지만 여기는 해당 없음).
+     * Order 1:N OrderItem fetch join 으로 중복 row 가 생기므로 DISTINCT 로 제거.
+     * 정렬은 createdAt DESC.
+     */
+    @Query("SELECT DISTINCT o FROM Order o " +
+           "LEFT JOIN FETCH o.items i " +
+           "LEFT JOIN FETCH i.product " +
+           "WHERE o.user = :user " +
+           "ORDER BY o.createdAt DESC")
+    List<Order> findByUserWithItemsAndProduct(@Param("user") User user);
 
     // ─── 7-G 라운드 6 (5/25): 관리자 주문 관리 ──────────────────────────
     /**

@@ -59,7 +59,9 @@ public class OrderService {
     public List<OrderDto.Response> getMyOrders(String email) {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다."));
-        return orderRepository.findByUserOrderByCreatedAtDesc(user)
+        // N+1 방어: items + 각 item 의 product 까지 fetch join 으로 한 번에 로딩
+        // (페이징 없는 List 라 컬렉션 fetch join 안전, DISTINCT 로 중복 제거).
+        return orderRepository.findByUserWithItemsAndProduct(user)
                 .stream().map(this::toResponse).collect(Collectors.toList());
     }
 
@@ -97,6 +99,7 @@ public class OrderService {
                 .map(item -> OrderDto.OrderItemResponse.builder()
                         .productId(item.getProduct().getId())
                         .productName(item.getProduct().getName())
+                        .productImage(item.getProduct().getImageUrl())
                         .price(item.getPrice())
                         .quantity(item.getQuantity())
                         .build())
