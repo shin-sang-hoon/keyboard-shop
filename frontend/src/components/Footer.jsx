@@ -23,7 +23,7 @@ export default function Footer() {
 
           <div style={styles.infoLine}>
             <span style={styles.label}>주소 :</span>
-            <span style={styles.value}>인천광역시 (포트폴리오 프로젝트, 실주소 미공개)</span>
+            <span style={styles.value}>(21518) 인천광역시 남동구 백범로248번길 20 (만수동, 영풍아파트) 101동 1404호</span>
           </div>
 
           <div style={styles.infoLine}>
@@ -49,7 +49,7 @@ export default function Footer() {
 
           <div style={styles.infoLine}>
             <span style={styles.label}>이메일:</span>
-            <span style={styles.value}>popeeplus87@gmail.com</span>
+            <span style={styles.value}>popeeplus87@naver.com</span>
           </div>
         </div>
 

@@ -145,15 +145,15 @@ export default function RefundPolicy() {
           고객센터에 문의주시면 영업일 기준 24시간 이내 답변드립니다.
         </p>
         <div style={S.csActions}>
-          <a href="tel:1588-0000" style={S.csBtnPrimary}>
-            📞 1588-0000
+          <a href="tel:010-6824-7715" style={S.csBtnPrimary}>
+            📞 010-6824-7715
           </a>
-          <a href="mailto:support@keyboard-shop.com" style={S.csBtnSecondary}>
+          <a href="mailto:popeeplus87@naver.com" style={S.csBtnSecondary}>
             ✉️ 이메일 문의
           </a>
         </div>
         <p style={S.csHours}>
-          상담 가능 시간: 평일 09:00 ~ 18:00 (점심 12:00 ~ 13:00 제외)
+          상담 가능 시간: 평일 AM9:30 ~ PM6:20 (점심 PM1:20 ~ PM2:30 제외, 주말·공휴일 휴무)
         </p>
       </section>
     </div>

@@ -24,6 +24,8 @@ import JoinAgreePage from './pages/JoinAgreePage';
 import MyPage from './pages/MyPage';
 import ProfileEditPage from './pages/ProfileEditPage';
 import PlaceholderPage from './pages/PlaceholderPage';
+import TermsPage from './pages/TermsPage';
+import PrivacyPage from './pages/PrivacyPage';
 import NoticeDetailPage from './pages/NoticeDetailPage';
 import KakaoCallbackPage from './pages/KakaoCallbackPage';
 import AdminAuditLogPage from './pages/admin/AdminAuditLogPage';
@@ -158,29 +160,9 @@ function App() {
         <Route path="/cart" element={<CartPage />} />
         <Route path="/order" element={<OrderPlaceholderPage />} />
 
-        {/* 약관 - placeholder (Phase 8 배포 시 실제 콘텐츠) */}
-        <Route
-          path="/terms"
-          element={
-            <PlaceholderPage
-              title="이용약관"
-              subtitle="실제 운영 시 법무 검토 후 게재 예정"
-              plannedPhase="Phase 8 배포"
-              links={[{ to: '/', label: '메인으로' }]}
-            />
-          }
-        />
-        <Route
-          path="/privacy"
-          element={
-            <PlaceholderPage
-              title="개인정보처리방침"
-              subtitle="실제 운영 시 법무 검토 후 게재 예정"
-              plannedPhase="Phase 8 배포"
-              links={[{ to: '/', label: '메인으로' }]}
-            />
-          }
-        />
+        {/* 약관 / 개인정보처리방침 — 실제 페이지 (footer 링크) */}
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
 
         {/* 404 */}
         <Route
