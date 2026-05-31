@@ -217,9 +217,12 @@ function CartItemRow({ item, onDecrease, onIncrease, onRemove }) {
   const subtotal = item.subtotal ?? (price * quantity);
   const thumb = item.thumbnailUrl || item.imageUrl;
 
+  // ─── 3블록 flex 구조 ─────────────────────────────────────
+  //   [썸네일(고정)] [정보(flex, minWidth:0 → ellipsis)] [우측 컨트롤(고정, shrink:0)]
+  //   제품명이 길어도 정보 블록만 줄어들고, 우측(수량/소계/삭제)은 절대 침범당하지 않음.
   return (
     <div style={S.itemRow}>
-      {/* 썸네일 */}
+      {/* 썸네일 (고정폭) */}
       <Link to={`/products/${item.productId}`} style={S.itemThumbLink}>
         {thumb ? (
           <img src={thumb} alt={name} style={S.itemThumb} />
@@ -228,31 +231,34 @@ function CartItemRow({ item, onDecrease, onIncrease, onRemove }) {
         )}
       </Link>
 
-      {/* 정보 */}
+      {/* 정보 (가변폭, minWidth:0 으로 grid/flex blowout 차단) */}
       <div style={S.itemInfo}>
+        {brand && <div style={S.itemBrand}>{brand}</div>}
         <Link to={`/products/${item.productId}`} style={S.itemNameLink}>
           <div style={S.itemName}>{name}</div>
         </Link>
-        {brand && <div style={S.itemBrand}>{brand}</div>}
         <div style={S.itemPrice}>₩{price.toLocaleString()}</div>
       </div>
 
-      {/* 수량 컨트롤 */}
-      <div style={S.qtyControl}>
-        <button onClick={onDecrease} style={S.qtyBtn} aria-label="감소">−</button>
-        <span style={S.qtyValue}>{quantity}</span>
-        <button onClick={onIncrease} style={S.qtyBtn} aria-label="증가">+</button>
-      </div>
+      {/* 우측 컨트롤 묶음 (고정폭, flex-shrink:0) */}
+      <div style={S.itemControls}>
+        {/* 수량 컨트롤 */}
+        <div style={S.qtyControl}>
+          <button onClick={onDecrease} style={S.qtyBtn} aria-label="감소">−</button>
+          <span style={S.qtyValue}>{quantity}</span>
+          <button onClick={onIncrease} style={S.qtyBtn} aria-label="증가">+</button>
+        </div>
 
-      {/* 소계 */}
-      <div style={S.itemSubtotal}>
-        ₩{subtotal.toLocaleString()}
-      </div>
+        {/* 소계 */}
+        <div style={S.itemSubtotal}>
+          ₩{subtotal.toLocaleString()}
+        </div>
 
-      {/* 삭제 */}
-      <button onClick={onRemove} style={S.removeBtn} aria-label="삭제">
-        ✕
-      </button>
+        {/* 삭제 */}
+        <button onClick={onRemove} style={S.removeBtn} aria-label="삭제">
+          ✕
+        </button>
+      </div>
     </div>
   );
 }
@@ -346,16 +352,15 @@ const S = {
     textDecoration: 'underline',
   },
 
-  // 아이템 행
+  // 아이템 행 — flex 3블록 (썸네일 / 정보 / 우측 컨트롤). grid 음수폭 blowout 방지.
   itemRow: {
-    display: 'grid',
-    gridTemplateColumns: '88px 1fr 120px 100px 32px',
+    display: 'flex',
     alignItems: 'center',
     gap: 16,
     padding: '20px 24px',
     borderBottom: '1px solid #f3f4f6',
   },
-  itemThumbLink: { display: 'block', textDecoration: 'none' },
+  itemThumbLink: { display: 'block', textDecoration: 'none', flexShrink: 0 },
   itemThumb: {
     width: 88,
     height: 88,
@@ -373,14 +378,16 @@ const S = {
     alignItems: 'center',
     justifyContent: 'center',
     fontSize: 32,
+    flexShrink: 0,
   },
   itemInfo: {
+    flex: 1,
+    minWidth: 0,            // ← 핵심: 긴 제품명이 우측 컨트롤을 밀지 않도록 ellipsis 허용
     display: 'flex',
     flexDirection: 'column',
     gap: 4,
-    minWidth: 0,
   },
-  itemNameLink: { textDecoration: 'none', color: 'inherit' },
+  itemNameLink: { textDecoration: 'none', color: 'inherit', minWidth: 0 },
   itemName: {
     fontSize: 15,
     fontWeight: 600,
@@ -391,6 +398,7 @@ const S = {
     WebkitLineClamp: 2,
     WebkitBoxOrient: 'vertical',
     lineHeight: 1.4,
+    wordBreak: 'break-all',
   },
   itemBrand: {
     fontSize: 12,
@@ -402,6 +410,14 @@ const S = {
     marginTop: 4,
   },
 
+  // 우측 컨트롤 묶음 — 고정폭, 절대 줄어들지 않음
+  itemControls: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 16,
+    flexShrink: 0,
+  },
+
   // 수량 컨트롤
   qtyControl: {
     display: 'flex',
@@ -410,6 +426,7 @@ const S = {
     borderRadius: 6,
     overflow: 'hidden',
     background: '#fff',
+    flexShrink: 0,
   },
   qtyBtn: {
     width: 36,
@@ -421,9 +438,10 @@ const S = {
     fontWeight: 500,
     color: colors.textOnLight,
     transition: 'background 0.12s',
+    flexShrink: 0,
   },
   qtyValue: {
-    minWidth: 36,
+    minWidth: 40,
     textAlign: 'center',
     fontSize: 14,
     fontWeight: 600,
@@ -436,11 +454,13 @@ const S = {
 
   // 소계
   itemSubtotal: {
+    width: 110,
     fontSize: 16,
     fontWeight: 700,
     color: colors.textOnLight,
     textAlign: 'right',
     fontVariantNumeric: 'tabular-nums',
+    flexShrink: 0,
   },
 
   // 삭제
@@ -454,6 +474,7 @@ const S = {
     cursor: 'pointer',
     borderRadius: 16,
     transition: 'all 0.12s',
+    flexShrink: 0,
   },
 
   // 우측 sticky 총액
