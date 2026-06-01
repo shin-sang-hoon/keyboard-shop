@@ -20,6 +20,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, Navigate } from 'react-router-dom';
 import { useCartStore } from '../stores/cartStore';
 import { useAuth } from '../hooks/useAuth';
+import { createOrder } from '../api/order';
 import { colors, spacing, radius } from '../styles/tokens';
 
 export default function OrderPlaceholderPage() {
@@ -50,23 +51,45 @@ export default function OrderPlaceholderPage() {
     setTimeout(() => setToast(null), 3500);
   }
 
-  // ─── 주문 완료 (mock) ─────────────────────────────────
+  // ─── 주문 완료 (실제 주문 생성 → 결제는 mock) ─────────
+  //   순서가 중요: createOrder 로 DB에 Order 를 먼저 만든 뒤(성공해야만)
+  //   Toast → clearCart → navigate. 주문 생성 실패 시 cart 를 비우지 않아 데이터 유실 방지.
+  //   items 는 clearCart 전에 캡처 (비우면 사라지므로).
   async function handleSubmitOrder() {
     if (submitting) return;
     if (!window.confirm(
       `총 ${totalQuantity}개 / ₩${totalPrice.toLocaleString()} 결제하시겠습니까?\n\n` +
-      `(이번 단계는 mock 동작 - 실제 결제는 Phase 8 배포 단계에서 도입 예정)`
+      `(결제 자체는 mock 동작 - 실제 PG 연동은 Phase 8 배포 단계에서 도입 예정)`
     )) return;
+
+    // clearCart 전에 주문 품목 스냅샷 캡처 (커스텀 빌드는 옵션도 함께)
+    const orderItems = (items || []).map((it) => ({
+      productId: it.productId,
+      quantity: it.quantity ?? 1,
+      ...(it.layout || it.switchType || it.keycapColor || it.caseColor
+        ? {
+            layout: it.layout ?? null,
+            switchType: it.switchType ?? null,
+            keycapColor: it.keycapColor ?? null,
+            caseColor: it.caseColor ?? null,
+          }
+        : {}),
+    }));
+
+    if (orderItems.length === 0) {
+      showToast('주문할 상품이 없습니다');
+      return;
+    }
 
     setSubmitting(true);
     try {
-      // mock latency (실제론 백엔드 /api/orders POST + PG 결제)
-      await new Promise((r) => setTimeout(r, 600));
+      // 1) 실제 주문 생성 (백엔드 POST /api/orders → orders + order_items 저장)
+      const order = await createOrder(orderItems);
 
-      // Toast 먼저 띄움 - 화면이 마지막까지 정상 상태로 유지
-      showToast('주문이 완료되었습니다 (mock)');
+      // 2) 주문 생성 성공 → Toast 먼저 (화면을 마지막까지 정상 상태로 유지)
+      showToast(`주문이 완료되었습니다 (주문번호 ${order?.id ?? '-'})`);
 
-      // 2.5초 후 clearCart + navigate (Toast 충분히 표시 후)
+      // 3) 2.5초 후 clearCart + navigate (Toast 충분히 표시 후)
       setTimeout(async () => {
         try {
           await clearCart();
@@ -76,8 +99,10 @@ export default function OrderPlaceholderPage() {
         navigate('/', { replace: true });
       }, 2500);
     } catch (err) {
-      console.error('Order mock error:', err);
-      showToast('주문 처리 실패');
+      // 주문 생성 실패 — cart 는 그대로 보존, 재시도 가능
+      console.error('createOrder error:', err);
+      const msg = err?.response?.data?.message || '주문 처리에 실패했습니다. 다시 시도해주세요.';
+      showToast(msg);
       setSubmitting(false);
     }
   }
@@ -99,10 +124,11 @@ export default function OrderPlaceholderPage() {
 
         {/* mock 안내 배너 */}
         <div style={S.mockBanner}>
-          <strong style={S.mockBannerTitle}>⚠️ Mock 동작</strong>
+          <strong style={S.mockBannerTitle}>⚠️ 결제 Mock 동작</strong>
           <div style={S.mockBannerDesc}>
-            이 페이지는 도메인 흐름 시연용 — 실제 결제 (토스 페이먼츠 / 아임포트) 연동은
-            <strong> Phase 8 배포 단계</strong>에서 도입 예정.
+            주문은 실제로 생성·저장되어 <strong>마이페이지 &gt; 주문내역</strong>에 반영됩니다.
+            다만 실제 결제 (토스 페이먼츠 / 아임포트) 연동은
+            <strong> Phase 8 배포 단계</strong>에서 도입 예정 — 현재 결제 자체는 mock.
           </div>
         </div>
 
@@ -194,6 +220,28 @@ export default function OrderPlaceholderPage() {
 // ============================================================================
 // 주문 상품 행
 // ============================================================================
+
+// 3D 빌더 옵션 id → 한글 표시 라벨 (KeyboardBuilder / CartPage 와 일치)
+const LAYOUT_LABEL = { '65': '65%', '75': '75%', TKL: 'TKL', FULL: '풀배열' };
+const SWITCH_LABEL = { LINEAR: '리니어', TACTILE: '택타일', CLICKY: '클리키' };
+const KEYCAP_LABEL = {
+  original: '오리지널 키캡', white: '화이트 키캡', black: '블랙 키캡',
+  gray: '스모크 키캡', navy: '네이비 키캡', red: '레트로 레드 키캡', mint: '민트 키캡',
+};
+const CASE_LABEL = {
+  original: '오리지널 케이스', white: '화이트 케이스', silver: '실버 케이스',
+  black: '블랙 케이스', beige: '베이지 케이스',
+};
+
+function buildOptionLabels(item) {
+  const labels = [];
+  if (item.layout) labels.push(LAYOUT_LABEL[item.layout] || item.layout);
+  if (item.switchType) labels.push(SWITCH_LABEL[item.switchType] || item.switchType);
+  if (item.keycapColor) labels.push(KEYCAP_LABEL[item.keycapColor] || item.keycapColor);
+  if (item.caseColor) labels.push(CASE_LABEL[item.caseColor] || item.caseColor);
+  return labels;
+}
+
 function OrderItemRow({ item }) {
   const name = item.productName || item.name || '상품명 없음';
   const brand = item.brandName;
@@ -201,6 +249,7 @@ function OrderItemRow({ item }) {
   const quantity = item.quantity ?? 1;
   const subtotal = item.subtotal ?? (price * quantity);
   const thumb = item.thumbnailUrl || item.imageUrl;
+  const optionLabels = buildOptionLabels(item);
 
   return (
     <div style={S.orderItemRow}>
@@ -212,6 +261,13 @@ function OrderItemRow({ item }) {
       <div style={S.orderItemInfo}>
         <div style={S.orderItemName}>{name}</div>
         {brand && <div style={S.orderItemBrand}>{brand}</div>}
+        {optionLabels.length > 0 && (
+          <div style={S.orderItemOptions}>
+            {optionLabels.map((opt) => (
+              <span key={opt} style={S.orderItemOptionBadge}>{opt}</span>
+            ))}
+          </div>
+        )}
         <div style={S.orderItemMeta}>
           ₩{price.toLocaleString()} × {quantity}
         </div>
@@ -354,6 +410,22 @@ const S = {
   orderItemBrand: {
     fontSize: 12,
     color: colors.textOnLightDim,
+  },
+  orderItemOptions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 3,
+  },
+  orderItemOptionBadge: {
+    fontSize: 11,
+    fontWeight: 500,
+    color: '#4A42B0',
+    background: 'rgba(74,66,176,0.08)',
+    border: '1px solid rgba(74,66,176,0.2)',
+    borderRadius: 5,
+    padding: '2px 7px',
+    whiteSpace: 'nowrap',
   },
   orderItemMeta: {
     fontSize: 12,

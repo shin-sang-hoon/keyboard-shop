@@ -32,3 +32,7 @@ frontend/.env.local
 keyboard_db_backup_*.sql 
 schema_dump_*.sql 
 uploads/
+
+step_converter/
+glb_analyze/
+*.before-floor

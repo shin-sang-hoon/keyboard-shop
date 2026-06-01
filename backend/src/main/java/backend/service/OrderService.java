@@ -26,6 +26,7 @@ public class OrderService {
     private final OrderItemRepository orderItemRepository;
     private final ProductRepository productRepository;
     private final UserRepository userRepository;
+    private final BuilderPriceCalculator priceCalculator;
 
     @Transactional
     public OrderDto.Response createOrder(String email, OrderDto.Request request) {
@@ -35,10 +36,23 @@ public class OrderService {
         List<OrderItem> items = request.getItems().stream().map(itemReq -> {
             Product product = productRepository.findById(itemReq.getProductId())
                     .orElseThrow(() -> new RuntimeException("상품을 찾을 수 없습니다."));
+
+            // 서버측 단가 재계산 (위변조 방어) — 클라가 보낸 가격은 신뢰하지 않고 옵션 ID 로만 계산.
+            // 옵션 없으면(일반 상품) null → product.price 를 단가로 사용. cart 와 동일 계산기.
+            Integer unitPrice = priceCalculator.calcUnitPrice(
+                    product, itemReq.getLayout(), itemReq.getSwitchType(), itemReq.getKeycapColor());
+            int effectiveUnit = (unitPrice != null) ? unitPrice
+                    : (product.getPrice() != null ? product.getPrice() : 0);
+
             return OrderItem.builder()
                     .product(product)
                     .quantity(itemReq.getQuantity())
-                    .price(product.getPrice() * itemReq.getQuantity())
+                    .price(effectiveUnit * itemReq.getQuantity())
+                    .unitPrice(unitPrice)
+                    .layout(itemReq.getLayout())
+                    .switchType(itemReq.getSwitchType())
+                    .keycapColor(itemReq.getKeycapColor())
+                    .caseColor(itemReq.getCaseColor())
                     .build();
         }).collect(Collectors.toList());
 
@@ -102,6 +116,11 @@ public class OrderService {
                         .productImage(item.getProduct().getImageUrl())
                         .price(item.getPrice())
                         .quantity(item.getQuantity())
+                        .unitPrice(item.getUnitPrice())
+                        .layout(item.getLayout())
+                        .switchType(item.getSwitchType())
+                        .keycapColor(item.getKeycapColor())
+                        .caseColor(item.getCaseColor())
                         .build())
                 .collect(Collectors.toList());
 

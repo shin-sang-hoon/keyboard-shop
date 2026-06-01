@@ -209,6 +209,29 @@ function EmptyCart() {
 // ============================================================================
 // 카트 아이템 행
 // ============================================================================
+
+// 3D 빌더 옵션 id → 한글 표시 라벨 (KeyboardBuilder 옵션명과 일치)
+const LAYOUT_LABEL = { '65': '65%', '75': '75%', TKL: 'TKL', FULL: '풀배열' };
+const SWITCH_LABEL = { LINEAR: '리니어', TACTILE: '택타일', CLICKY: '클리키' };
+const KEYCAP_LABEL = {
+  original: '오리지널 키캡', white: '화이트 키캡', black: '블랙 키캡',
+  gray: '스모크 키캡', navy: '네이비 키캡', red: '레트로 레드 키캡', mint: '민트 키캡',
+};
+const CASE_LABEL = {
+  original: '오리지널 케이스', white: '화이트 케이스', silver: '실버 케이스',
+  black: '블랙 케이스', beige: '베이지 케이스',
+};
+
+/** 카트 아이템의 커스텀 옵션을 표시용 라벨 배열로 (옵션 없으면 빈 배열). */
+function buildOptionLabels(item) {
+  const labels = [];
+  if (item.layout) labels.push(LAYOUT_LABEL[item.layout] || item.layout);
+  if (item.switchType) labels.push(SWITCH_LABEL[item.switchType] || item.switchType);
+  if (item.keycapColor) labels.push(KEYCAP_LABEL[item.keycapColor] || item.keycapColor);
+  if (item.caseColor) labels.push(CASE_LABEL[item.caseColor] || item.caseColor);
+  return labels;
+}
+
 function CartItemRow({ item, onDecrease, onIncrease, onRemove }) {
   const name = item.productName || item.name || '상품명 없음';
   const brand = item.brandName;
@@ -216,6 +239,9 @@ function CartItemRow({ item, onDecrease, onIncrease, onRemove }) {
   const quantity = item.quantity ?? 1;
   const subtotal = item.subtotal ?? (price * quantity);
   const thumb = item.thumbnailUrl || item.imageUrl;
+
+  // 3D 빌더 커스텀 옵션 배지 (일반 상품은 옵션이 없어 표시 안 됨)
+  const optionLabels = buildOptionLabels(item);
 
   // ─── 3블록 flex 구조 ─────────────────────────────────────
   //   [썸네일(고정)] [정보(flex, minWidth:0 → ellipsis)] [우측 컨트롤(고정, shrink:0)]
@@ -237,6 +263,13 @@ function CartItemRow({ item, onDecrease, onIncrease, onRemove }) {
         <Link to={`/products/${item.productId}`} style={S.itemNameLink}>
           <div style={S.itemName}>{name}</div>
         </Link>
+        {optionLabels.length > 0 && (
+          <div style={S.itemOptions}>
+            {optionLabels.map((opt) => (
+              <span key={opt} style={S.itemOptionBadge}>{opt}</span>
+            ))}
+          </div>
+        )}
         <div style={S.itemPrice}>₩{price.toLocaleString()}</div>
       </div>
 
@@ -399,6 +432,22 @@ const S = {
     WebkitBoxOrient: 'vertical',
     lineHeight: 1.4,
     wordBreak: 'break-all',
+  },
+  itemOptions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 2,
+  },
+  itemOptionBadge: {
+    fontSize: 11,
+    fontWeight: 500,
+    color: '#4A42B0',
+    background: 'rgba(74,66,176,0.08)',
+    border: '1px solid rgba(74,66,176,0.2)',
+    borderRadius: 5,
+    padding: '2px 7px',
+    whiteSpace: 'nowrap',
   },
   itemBrand: {
     fontSize: 12,

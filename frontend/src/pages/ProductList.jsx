@@ -13,6 +13,7 @@ import { useEffect, useState, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+import { is3DReady } from '../utils/builder3d';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8081/api';
 
@@ -140,7 +141,7 @@ function ProductCard({ product }) {
 
   // glbUrl 이 있으면 3D 썸네일 시도, 없으면 image_url fallback
   useEffect(() => {
-    if (!product.glbUrl) return;
+    if (!is3DReady(product.glbUrl)) return;
     if (!ref.current) return;
     const observer = new IntersectionObserver(
       (entries) => {
@@ -160,7 +161,7 @@ function ProductCard({ product }) {
   }, [product.glbUrl]);
 
   // 표시 우선순위: 3D 썸네일 > image_url > placeholder
-  const hasGlb = Boolean(product.glbUrl) && product.productType === 'KEYBOARD';
+  const hasGlb = is3DReady(product.glbUrl) && product.productType === 'KEYBOARD';
   const showImage = !hasGlb && product.imageUrl && !imgError;
 
   return (

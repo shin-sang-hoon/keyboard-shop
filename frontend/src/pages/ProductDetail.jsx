@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { addRecentlyViewed } from '../utils/recentlyViewed';
+import { is3DReady } from '../utils/builder3d';
 import { useParams, Link } from 'react-router-dom';
 import ProductGallery from '../components/ProductGallery';
 import ProductTabs from '../components/ProductTabs';
@@ -436,7 +437,7 @@ export default function ProductDetail() {
     );
   }
 
-  const hasGlb = Boolean(product.glbUrl) && product.productType === 'KEYBOARD';
+  const hasGlb = is3DReady(product.glbUrl) && product.productType === 'KEYBOARD';
   // 품절 판정 (B-1): ACTIVE 면서 stock===0. stock NULL/양수는 구매 가능.
   // 핫딜(activeAuction) 상품은 입찰 흐름이라 품절 가드와 무관.
   const isSoldOut = product.status === 'ACTIVE' && product.stock === 0;

@@ -2,10 +2,11 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
+import { is3DReady } from "../utils/builder3d";
+import { useCartStore } from "../stores/cartStore";
 
 // ── API ───────────────────────────────────────────────────────────────────────
 const API_BASE = "http://localhost:8080/api";
-const getToken = () => localStorage.getItem("accessToken");
 const VERSION = "v3.5";
 
 // ── 옵션 데이터 ───────────────────────────────────────────────────────────────
@@ -476,9 +477,7 @@ export default function KeyboardBuilder({
   const [caseColor, setCaseColor] = useState(CASE_COLORS[0]);
   const [loading,   setLoading]   = useState(true);
   const [loadError, setLoadError] = useState(null);
-  const [saving,    setSaving]    = useState(false);
-  const [saved,     setSaved]     = useState(false);
-  const [myBuilds,  setMyBuilds]  = useState([]);
+  const [toast,     setToast]     = useState(null);
   const [layoutVariants, setLayoutVariants] = useState({});
 
   const swPrice     = SWITCHES.find(s => s.id === sw)?.price || 0;
@@ -703,7 +702,7 @@ export default function KeyboardBuilder({
     const fileName = glbUrl.split("/").pop();
 
     fetchValidGlbs().then(validSet => {
-      if (false) { // TEMP BYPASS
+      if (!is3DReady(glbUrl)) { // 화이트리스트 게이트 (검증된 모델만 3D)
         console.warn("⚠️ GLB가 화이트리스트에 없음:", glbUrl);
         setLoadError(`이 모델의 3D 파일이 준비되지 않았습니다`);
         setLoading(false);
@@ -764,45 +763,42 @@ export default function KeyboardBuilder({
     applyColors(keycap.hex, caseColor.hex);
   }, [keycap, caseColor, applyColors]);
 
-  const fetchMyBuilds = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/builds/my`, {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
-      if (res.ok) setMyBuilds(await res.json());
-    } catch {}
-  }, []);
+  const addItem = useCartStore((s) => s.addItem);
 
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const res = await fetch(`${API_BASE}/builds`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
-        },
-        body: JSON.stringify({
-          productId,
-          buildConfig: { layout, switchType: sw, keycapColor: keycap.id, caseColor: caseColor.id, totalPrice },
-        }),
-      });
-      if (!res.ok) throw new Error();
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
-      fetchMyBuilds();
-    } catch {
-      alert("저장 실패: 로그인이 필요합니다.");
-    } finally {
-      setSaving(false);
+  const showToast = (msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2200);
+  };
+
+  // 장바구니: ProductDetail 과 동일하게 cartStore.addItem 사용
+  // (로그인 → 백엔드 동기화, 비로그인 → localStorage)
+  const handleAddToCart = async () => {
+    if (!productId) { showToast("상품 정보를 불러오는 중입니다"); return; }
+    const options = {
+      layout,                 // 현재 선택 레이아웃 id (65/75/TKL/FULL)
+      switchType: sw,         // LINEAR/TACTILE/CLICKY
+      keycapColor: keycap.id, // original/white/black/...
+      caseColor: caseColor.id,
+    };
+    const product = {
+      id: productId,
+      name: productName,
+      // 비로그인 표시용 단가 = 옵션 반영가(totalPrice). 로그인 시엔 서버가 재계산하므로 무관.
+      price: totalPrice,
+      imageUrl: null, // 로그인 시 백엔드가 상품 이미지로 채움
+    };
+    const result = await addItem(product, 1, options);
+    if (result?.ok) {
+      showToast("장바구니에 담겼습니다");
+    } else {
+      showToast(result?.message || "장바구니 담기에 실패했습니다");
     }
   };
 
-  const handleLoadBuild = (b) => {
-    const cfg = b.buildConfig;
-    if (cfg.switchType) setSw(cfg.switchType);
-    if (cfg.keycapColor) setKeycap(KEYCAP_COLORS.find(k=>k.id===cfg.keycapColor)||KEYCAP_COLORS[0]);
-    if (cfg.caseColor)  setCaseColor(CASE_COLORS.find(c=>c.id===cfg.caseColor)||CASE_COLORS[0]);
+  // 구매하기: ProductDetail 의 handleBuy 와 동일 동작
+  // (구매 플로우 구현 시 함께 실제 결제로 연동)
+  const handleBuy = () => {
+    showToast("구매 페이지 준비 중입니다");
   };
 
   const handleLayoutClick = (l) => {
@@ -813,12 +809,10 @@ export default function KeyboardBuilder({
 
   return (
     <div style={S.container}>
+      {toast && <div style={S.toast}>{toast}</div>}
       <p style={S.pageTitle}>
         {productName ? `${productName} · CUSTOM` : "KEYBOARD CUSTOM BUILDER · 3D"}
       </p>
-      {productDescription && (
-        <p style={S.pageSub}>{productDescription}</p>
-      )}
 
       <div style={S.builder}>
         <div style={S.viewer}>
@@ -912,26 +906,13 @@ export default function KeyboardBuilder({
             <span style={S.totalPrice}>₩{totalPrice.toLocaleString()}</span>
           </div>
 
-          <button onClick={handleSave} disabled={saving} style={{
-            ...S.saveBtn,
-            background: saved ? "#27AE60" : "#4A42B0",
-            opacity: saving ? 0.7 : 1,
-          }}>
-            {saving ? "저장 중..." : saved ? "✓ 저장됨!" : "빌드 저장하기"}
+          <button onClick={handleBuy} style={{ ...S.saveBtn, background: "#4A42B0" }}>
+            구매하기
           </button>
 
-          <button onClick={fetchMyBuilds} style={S.loadBtn}>내 빌드 불러오기</button>
-
-          {myBuilds.length > 0 && (
-            <div style={S.buildList}>
-              <p style={S.buildListTitle}>저장된 빌드 ({myBuilds.length})</p>
-              {myBuilds.map((b, i) => (
-                <button key={b.id} onClick={()=>handleLoadBuild(b)} style={S.buildItem}>
-                  빌드 #{i+1} · {b.buildConfig?.layout} · {b.buildConfig?.switchType} · ₩{b.buildConfig?.totalPrice?.toLocaleString()}
-                </button>
-              ))}
-            </div>
-          )}
+          <button onClick={handleAddToCart} style={S.cartBtn}>
+            🛒 장바구니
+          </button>
         </div>
       </div>
     </div>
@@ -1019,6 +1000,8 @@ const S = {
   totalPrice: { fontSize:"20px", fontWeight:700, color:"#1A1814" },
   saveBtn:   { width:"100%", padding:"13px", borderRadius:"10px", border:"none", color:"#FFFFFF", fontSize:"14px", fontWeight:600, cursor:"pointer", transition:"all 0.2s", letterSpacing:"0.03em", fontFamily:"inherit" },
   loadBtn:   { width:"100%", padding:"10px", borderRadius:"10px", border:"1.5px solid rgba(0,0,0,0.12)", background:"transparent", color:"#5A5855", fontSize:"13px", fontWeight:500, cursor:"pointer", fontFamily:"inherit" },
+  cartBtn:   { width:"100%", padding:"12px", borderRadius:"10px", border:"1.5px solid #4A42B0", background:"#FFFFFF", color:"#4A42B0", fontSize:"14px", fontWeight:600, cursor:"pointer", fontFamily:"inherit", marginTop:"2px", letterSpacing:"0.03em" },
+  toast:     { position:"fixed", bottom:"32px", left:"50%", transform:"translateX(-50%)", background:"#1A1814", color:"#FFFFFF", padding:"12px 24px", borderRadius:"10px", fontSize:"14px", fontWeight:500, zIndex:1000, boxShadow:"0 4px 16px rgba(0,0,0,0.2)" },
   buildList: { background:"#FFFFFF", borderRadius:"10px", padding:"12px", border:"1px solid rgba(0,0,0,0.07)", display:"flex", flexDirection:"column", gap:"6px" },
   buildListTitle: { fontSize:"11px", fontWeight:600, color:"#8A8680", letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:"4px" },
   buildItem: { padding:"9px 12px", borderRadius:"7px", border:"1px solid rgba(0,0,0,0.08)", background:"#F8F7F5", fontSize:"12px", color:"#3A3835", cursor:"pointer", textAlign:"left", fontFamily:"inherit" },

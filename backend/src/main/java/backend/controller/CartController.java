@@ -61,7 +61,8 @@ public class CartController {
         }
         int quantity = request.getQuantity() != null ? request.getQuantity() : 1;
         CartDto.View updated = cartService.addItem(
-                userDetails.getUsername(), request.getProductId(), quantity);
+                userDetails.getUsername(), request.getProductId(), quantity,
+                request.getLayout(), request.getSwitchType(), request.getKeycapColor(), request.getCaseColor());
         return ResponseEntity.ok(updated);
     }
 

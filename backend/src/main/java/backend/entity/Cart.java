@@ -73,15 +73,30 @@ public class Cart {
     // ─── 도메인 메서드 (Aggregate Root behavior) ─────────────────
 
     /**
-     * 아이템 추가. 같은 product 이미 있으면 quantity 증가.
-     * @return 추가된/갱신된 CartItem
+     * 아이템 추가 (일반 상품 — 옵션 없음). 같은 product 있으면 quantity 증가.
      */
     public CartItem addItem(Product product, int quantity) {
+        return addItem(product, quantity, null, null, null, null, null);
+    }
+
+    /**
+     * 아이템 추가 (3D 빌더 커스텀 옵션 포함).
+     * 같은 product + 같은 옵션 조합이면 quantity 합산, 옵션이 다르면 별도 아이템으로 추가.
+     * @param unitPrice 서버에서 재계산한 옵션 반영 단가 (null=일반 상품 → product.price 사용)
+     * @return 추가된/갱신된 CartItem
+     */
+    public CartItem addItem(Product product, int quantity,
+                            String layout, String switchType, String keycapColor, String caseColor,
+                            Integer unitPrice) {
         if (quantity <= 0) {
             throw new IllegalArgumentException("Quantity must be positive");
         }
         for (CartItem existing : items) {
-            if (existing.getProduct().getId().equals(product.getId())) {
+            if (existing.getProduct().getId().equals(product.getId())
+                    && sameOption(existing.getLayout(), layout)
+                    && sameOption(existing.getSwitchType(), switchType)
+                    && sameOption(existing.getKeycapColor(), keycapColor)
+                    && sameOption(existing.getCaseColor(), caseColor)) {
                 existing.setQuantity(existing.getQuantity() + quantity);
                 return existing;
             }
@@ -90,19 +105,32 @@ public class Cart {
                 .cart(this)
                 .product(product)
                 .quantity(quantity)
+                .layout(layout)
+                .switchType(switchType)
+                .keycapColor(keycapColor)
+                .caseColor(caseColor)
+                .unitPrice(unitPrice)
                 .build();
         items.add(newItem);
         return newItem;
     }
 
+    /** 옵션 동등 비교 (null-safe). */
+    private static boolean sameOption(String a, String b) {
+        return (a == null) ? (b == null) : a.equals(b);
+    }
+
     /**
-     * 총액 계산 (price × quantity 합).
+     * 총액 계산. unitPrice(옵션 반영 단가)가 있으면 그것, 없으면 product.price.
      */
     public int getTotalPrice() {
         return items.stream()
                 .mapToInt(item -> {
-                    Integer price = item.getProduct().getPrice();
-                    return (price != null ? price : 0) * item.getQuantity();
+                    Integer unit = item.getUnitPrice();
+                    int price = (unit != null)
+                            ? unit
+                            : (item.getProduct().getPrice() != null ? item.getProduct().getPrice() : 0);
+                    return price * item.getQuantity();
                 })
                 .sum();
     }

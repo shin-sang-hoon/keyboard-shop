@@ -37,6 +37,27 @@ const ORDER_STATUS_LABEL = {
   CANCELLED: '취소됨',
 };
 
+// ─── 3D 빌더 옵션 id → 한글 라벨 (KeyboardBuilder / CartPage 와 일치) ──────
+const LAYOUT_LABEL = { '65': '65%', '75': '75%', TKL: 'TKL', FULL: '풀배열' };
+const SWITCH_LABEL = { LINEAR: '리니어', TACTILE: '택타일', CLICKY: '클리키' };
+const KEYCAP_LABEL = {
+  original: '오리지널 키캡', white: '화이트 키캡', black: '블랙 키캡',
+  gray: '스모크 키캡', navy: '네이비 키캡', red: '레트로 레드 키캡', mint: '민트 키캡',
+};
+const CASE_LABEL = {
+  original: '오리지널 케이스', white: '화이트 케이스', silver: '실버 케이스',
+  black: '블랙 케이스', beige: '베이지 케이스',
+};
+
+function buildOptionLabels(it) {
+  const labels = [];
+  if (it.layout) labels.push(LAYOUT_LABEL[it.layout] || it.layout);
+  if (it.switchType) labels.push(SWITCH_LABEL[it.switchType] || it.switchType);
+  if (it.keycapColor) labels.push(KEYCAP_LABEL[it.keycapColor] || it.keycapColor);
+  if (it.caseColor) labels.push(CASE_LABEL[it.caseColor] || it.caseColor);
+  return labels;
+}
+
 function formatPrice(v) {
   if (v == null) return '-';
   return `${Number(v).toLocaleString()}원`;
@@ -303,7 +324,9 @@ function OrdersTab() {
             </span>
           </div>
           <div style={S.orderItems}>
-            {(order.items || []).map((it, idx) => (
+            {(order.items || []).map((it, idx) => {
+              const optionLabels = buildOptionLabels(it);
+              return (
               <div key={idx} style={S.orderItemRow}>
                 <div style={S.orderItemThumb}>
                   {it.productImage ? (
@@ -312,12 +335,22 @@ function OrdersTab() {
                     <div style={S.orderItemNoImg}>📦</div>
                   )}
                 </div>
-                <span style={S.orderItemName}>{it.productName}</span>
+                <div style={S.orderItemNameWrap}>
+                  <span style={S.orderItemName}>{it.productName}</span>
+                  {optionLabels.length > 0 && (
+                    <div style={S.orderItemOptions}>
+                      {optionLabels.map((opt) => (
+                        <span key={opt} style={S.orderItemOptionBadge}>{opt}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <span style={S.orderItemQty}>
                   {formatPrice(it.price)} · {it.quantity}개
                 </span>
               </div>
-            ))}
+              );
+            })}
           </div>
           <div style={S.orderFoot}>
             <span style={S.orderTotalLabel}>합계</span>
@@ -764,12 +797,32 @@ const S = {
   orderItemNoImg: {
     fontSize: 18,
   },
-  orderItemName: {
-    color: colors.textOnLight,
+  orderItemNameWrap: {
     flex: 1,
     minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 3,
+  },
+  orderItemName: {
+    color: colors.textOnLight,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  orderItemOptions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 4,
+  },
+  orderItemOptionBadge: {
+    fontSize: 11,
+    fontWeight: 500,
+    color: '#4A42B0',
+    background: 'rgba(74,66,176,0.08)',
+    border: '1px solid rgba(74,66,176,0.2)',
+    borderRadius: 5,
+    padding: '1px 6px',
     whiteSpace: 'nowrap',
   },
   orderItemQty: {

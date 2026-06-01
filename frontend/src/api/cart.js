@@ -36,10 +36,11 @@ export async function fetchCartCount() {
  * 상품 담기. 같은 product 이미 있으면 백엔드에서 quantity 합산.
  * @param {number} productId
  * @param {number} quantity 기본 1
+ * @param {object} [options] 3D 빌더 커스텀 옵션 { layout, switchType, keycapColor, caseColor }
  * @returns {Promise<CartView>} 갱신된 카트
  */
-export async function addCartItem(productId, quantity = 1) {
-  const res = await apiClient.post('/cart/items', { productId, quantity });
+export async function addCartItem(productId, quantity = 1, options = {}) {
+  const res = await apiClient.post('/cart/items', { productId, quantity, ...options });
   return res.data;
 }
 

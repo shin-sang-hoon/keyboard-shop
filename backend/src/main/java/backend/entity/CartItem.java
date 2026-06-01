@@ -18,9 +18,6 @@ import java.time.LocalDateTime;
  */
 @Entity
 @Table(name = "cart_items",
-        uniqueConstraints = {
-                @UniqueConstraint(name = "uk_cart_item_cart_product", columnNames = {"cart_id", "product_id"})
-        },
         indexes = {
                 @Index(name = "idx_cart_item_cart", columnList = "cart_id"),
                 @Index(name = "idx_cart_item_product", columnList = "product_id")
@@ -51,6 +48,26 @@ public class CartItem {
     @Column(nullable = false)
     @Builder.Default
     private int quantity = 1;
+
+    // ── 3D 빌더 커스텀 옵션 (일반 상품은 전부 null) ──────────────
+    @Column(length = 20)
+    private String layout;        // 65 / 75 / TKL / FULL
+
+    @Column(name = "switch_type", length = 20)
+    private String switchType;    // LINEAR / TACTILE / CLICKY
+
+    @Column(name = "keycap_color", length = 20)
+    private String keycapColor;   // original / white / black / gray / navy / red / mint
+
+    @Column(name = "case_color", length = 20)
+    private String caseColor;     // 빌더 케이스 색 id (가격 영향 없음, 표시용)
+
+    /**
+     * 옵션 반영 단가 (서버에서 가격표로 재계산해 저장 — 위변조 방어).
+     * null = 일반 상품 → product.price 를 그대로 단가로 사용.
+     */
+    @Column(name = "unit_price")
+    private Integer unitPrice;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

@@ -46,6 +46,7 @@ public class CartService {
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
     private final AuctionRepository auctionRepository;
+    private final BuilderPriceCalculator priceCalculator;
 
     // ─── 조회 ────────────────────────────────────────────
 
@@ -77,6 +78,12 @@ public class CartService {
      */
     @Transactional
     public CartDto.View addItem(String email, Long productId, int quantity) {
+        return addItem(email, productId, quantity, null, null, null, null);
+    }
+
+    @Transactional
+    public CartDto.View addItem(String email, Long productId, int quantity,
+                                String layout, String switchType, String keycapColor, String caseColor) {
         if (quantity <= 0) {
             throw BusinessException.badRequest("Quantity must be positive");
         }
@@ -100,9 +107,13 @@ public class CartService {
                             "This product is currently in auction. Please bid instead.");
                 });
 
-        // 도메인 메서드 호출 — Cart.addItem 이 중복 체크 + quantity 합산 자동 처리
-        cart.addItem(product, quantity);
-        log.info("Cart addItem: user={}, productId={}, quantity={}", email, productId, quantity);
+        // 서버측 단가 재계산 (위변조 방어) — 클라가 보낸 가격은 신뢰하지 않음
+        Integer unitPrice = priceCalculator.calcUnitPrice(product, layout, switchType, keycapColor);
+
+        // 도메인 메서드 — 같은 product+옵션이면 합산, 옵션이 다르면 별도 아이템
+        cart.addItem(product, quantity, layout, switchType, keycapColor, caseColor, unitPrice);
+        log.info("Cart addItem: user={}, productId={}, qty={}, sw={}, keycap={}, unitPrice={}",
+                email, productId, quantity, switchType, keycapColor, unitPrice);
 
         return CartDto.View.from(cart);
     }
@@ -219,8 +230,10 @@ public class CartService {
                 continue;
             }
 
-            // 머지 (Cart.addItem 의 중복 합산 로직)
-            cart.addItem(product, si.getQuantity());
+            // 서버측 단가 재계산 + 옵션 포함 머지 (Cart.addItem 의 합산 로직)
+            Integer unitPrice = priceCalculator.calcUnitPrice(product, si.getLayout(), si.getSwitchType(), si.getKeycapColor());
+            cart.addItem(product, si.getQuantity(),
+                    si.getLayout(), si.getSwitchType(), si.getKeycapColor(), si.getCaseColor(), unitPrice);
             merged++;
         }
 

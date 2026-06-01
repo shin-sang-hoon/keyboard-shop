@@ -55,14 +55,20 @@ public class CartDto {
         private String productName;
         private String thumbnailUrl;
         private String brandName;
-        private Integer price;
+        private Integer price;       // 옵션 반영 단가 (unitPrice 있으면 그것, 없으면 product.price)
         private Integer quantity;
-        private Integer subtotal; // price * quantity
+        private Integer subtotal;    // price * quantity
+        // 3D 빌더 커스텀 옵션 (일반 상품은 null → JSON 생략)
+        private String layout;
+        private String switchType;
+        private String keycapColor;
+        private String caseColor;
         private LocalDateTime updatedAt;
 
         public static ItemView from(CartItem item) {
             Product p = item.getProduct();
-            Integer price = p != null ? p.getPrice() : 0;
+            Integer unit = item.getUnitPrice();
+            Integer price = (unit != null) ? unit : (p != null ? p.getPrice() : 0);
             Integer q = item.getQuantity();
             return ItemView.builder()
                     .itemId(item.getId())
@@ -73,6 +79,10 @@ public class CartDto {
                     .price(price)
                     .quantity(q)
                     .subtotal(price != null ? price * q : 0)
+                    .layout(item.getLayout())
+                    .switchType(item.getSwitchType())
+                    .keycapColor(item.getKeycapColor())
+                    .caseColor(item.getCaseColor())
                     .updatedAt(item.getUpdatedAt())
                     .build();
         }
@@ -90,6 +100,11 @@ public class CartDto {
     public static class AddRequest {
         private Long productId;
         private Integer quantity = 1;
+        // 3D 빌더 커스텀 옵션 (일반 상품은 null)
+        private String layout;
+        private String switchType;
+        private String keycapColor;
+        private String caseColor;
     }
 
     /**
@@ -119,6 +134,11 @@ public class CartDto {
     public static class SyncItem {
         private Long productId;
         private Integer quantity;
+        // 3D 빌더 커스텀 옵션 (비로그인 카트에 저장됐던 것)
+        private String layout;
+        private String switchType;
+        private String keycapColor;
+        private String caseColor;
     }
 
     // ─── 헤더 배지용 ──────────────────────────────────────

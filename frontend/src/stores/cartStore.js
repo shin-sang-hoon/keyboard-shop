@@ -95,13 +95,15 @@ export const useCartStore = create(
        * @param {number} quantity
        * @returns {Promise<{ok: boolean, message?: string}>}
        */
-      addItem: async (product, quantity = 1) => {
+      addItem: async (product, quantity = 1, options = {}) => {
         const isLogged = get()._isLogged();
+        const { layout, switchType, keycapColor, caseColor } = options;
+        const hasOptions = !!(layout || switchType || keycapColor || caseColor);
 
         if (isLogged) {
-          // 로그인: 백엔드 호출 + serverCart 업데이트
+          // 로그인: 백엔드 호출 (옵션 있으면 함께 전달 → 서버가 단가 재계산) + serverCart 업데이트
           try {
-            const updated = await cartApi.addCartItem(product.id, quantity);
+            const updated = await cartApi.addCartItem(product.id, quantity, options);
             set({ serverCart: updated });
             return { ok: true };
           } catch (err) {
@@ -110,18 +112,28 @@ export const useCartStore = create(
           }
         } else {
           // 비로그인: localStorage 추가 (기존 동작 보존)
+          // 옵션이 있으면 "같은 product + 같은 옵션" 일 때만 합산 (서버 Cart.addItem 과 동일 규칙)
           const items = [...get().items];
-          const existing = items.find((it) => it.productId === product.id);
+          const existing = items.find((it) =>
+            it.productId === product.id &&
+            (it.layout ?? null) === (layout ?? null) &&
+            (it.switchType ?? null) === (switchType ?? null) &&
+            (it.keycapColor ?? null) === (keycapColor ?? null) &&
+            (it.caseColor ?? null) === (caseColor ?? null)
+          );
           if (existing) {
             existing.quantity += quantity;
           } else {
             items.push({
               productId: product.id,
               name: product.name,
+              // 옵션 있으면 빌더가 계산한 표시단가(product.price), 없으면 기본가
               price: product.price,
               imageUrl: product.imageUrl || product.images?.[0]?.url || null,
               brandName: product.brand?.name || product.brandName || null,
               quantity,
+              // 3D 빌더 커스텀 옵션 (일반 상품은 undefined → JSON 생략)
+              ...(hasOptions ? { layout, switchType, keycapColor, caseColor } : {}),
             });
           }
           set({ items });
@@ -217,6 +229,10 @@ export const useCartStore = create(
             const payload = localItems.map((it) => ({
               productId: it.productId,
               quantity: it.quantity,
+              layout: it.layout ?? null,
+              switchType: it.switchType ?? null,
+              keycapColor: it.keycapColor ?? null,
+              caseColor: it.caseColor ?? null,
             }));
             serverCart = await cartApi.syncCart(payload);
           } else {
