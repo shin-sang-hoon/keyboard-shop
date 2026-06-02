@@ -87,6 +87,10 @@ public class SecurityConfig {
                         // all open to anonymous visitors (POST /{id}/view included).
                         .requestMatchers("/api/notices", "/api/notices/**").permitAll()
 
+                        // [Chatbot · 6/2] 공개 FAQ 챗봇 - 비로그인 방문자도 사용.
+                        // RAG(키워드 검색 + Gemini) 기반, 인증 불필요. /chat, /health 포함.
+                        .requestMatchers("/api/chatbot/**").permitAll()
+
                         // [Phase 7-B] 업로드된 공지 첨부 이미지 - 정적 서빙, 공개.
                         .requestMatchers("/uploads/**").permitAll()
 
