@@ -3,6 +3,8 @@ package backend.repository;
 import backend.entity.Auction;
 import backend.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -16,6 +18,19 @@ public interface AuctionRepository extends JpaRepository<Auction, Long> {
     /** Status 별 경매 수 (관리자 대시보드 — 진행중 ACTIVE 카운트). 5/30. */
     long countByStatus(Auction.Status status);
     List<Auction> findByStatusOrderByEndAtAsc(Auction.Status status);
+
+    /**
+     * 챗봇 핫딜 패널용 — 진행 중(:status=ACTIVE) 경매를 마감 임박순으로 조회.
+     * product(+brand) 를 JOIN FETCH 한다 (ChatbotService 는 비트랜잭션 →
+     * 지연로딩 시 LazyInitializationException 방지). product INNER JOIN 이라
+     * 상품 연결이 없는 경매는 자동 제외된다.
+     */
+    @Query("SELECT a FROM Auction a " +
+           "JOIN FETCH a.product p " +
+           "LEFT JOIN FETCH p.brand " +
+           "WHERE a.status = :status " +
+           "ORDER BY a.endAt ASC")
+    List<Auction> findActiveWithProductForChatbot(@Param("status") Auction.Status status);
 
     // ─── Flash Deal 확장 (5/17) ───────────────────────────────────
 

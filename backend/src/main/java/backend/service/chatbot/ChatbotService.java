@@ -1,9 +1,11 @@
 package backend.service.chatbot;
 
 import backend.dto.chatbot.ChatbotResponse;
+import backend.entity.Auction;
 import backend.entity.ChatbotQa;
 import backend.entity.Product;
 import backend.entity.UnknownQueryLog;
+import backend.repository.AuctionRepository;
 import backend.repository.ChatbotQaRepository;
 import backend.repository.ProductRepository;
 import backend.repository.UnknownQueryLogRepository;
@@ -53,6 +55,7 @@ public class ChatbotService {
     private final RedisTemplate<String, Object> redisTemplate;
     private final IntentClassifier intentClassifier;
     private final ProductRepository productRepository;
+    private final AuctionRepository auctionRepository;
 
     @Value("${chatbot.cache.ttl-hours:24}")
     private long cacheTtlHours;
@@ -129,7 +132,7 @@ public class ChatbotService {
             return ChatbotResponse.direct(AGENT_REPLY, "AGENT", true);
         }
         if ("__AUCTION__".equals(question)) {
-            return ChatbotResponse.direct(AUCTION_REPLY, "RECOMMEND", false);
+            return auctionRecommendation();
         }
 
         // 1) 의도 분기 (캐시보다 먼저 — RECOMMEND/ANGRY 등은 캐시를 타지 않음)
@@ -315,6 +318,46 @@ public class ChatbotService {
                     .build());
         }
         return cards;
+    }
+
+    // ── 핫딜 경매 추천 ────────────────────────────────────────────────────
+    /**
+     * 핫딜 경매 패널(__AUCTION__) — 진행 중(ACTIVE) 경매를 마감 임박순 카드로.
+     *   - 카드 가격 = 현재가(currentPrice), id = 상품 id → '상품 보기'가 상세로 이동.
+     *     상세 페이지가 /auctions/active/by-product/{id} 로 핫딜을 조회해
+     *     🔥배지·현재가·LIVE 카운트다운·'입찰하러 가기'(→/auctions/{id}) 를 노출한다.
+     *   - 진행 중 경매 0건 → 안내 텍스트 폴백(AUCTION_REPLY).
+     * 캐시 안 탐(경매가는 실시간 가변).
+     */
+    private ChatbotResponse auctionRecommendation() {
+        List<Auction> actives =
+                auctionRepository.findActiveWithProductForChatbot(Auction.Status.ACTIVE);
+
+        List<ChatbotResponse.ProductCard> cards = new ArrayList<>();
+        for (Auction a : actives) {
+            Product p = a.getProduct();
+            if (p == null) continue;                 // 방어(JOIN FETCH 라 사실상 없음)
+            cards.add(ChatbotResponse.ProductCard.builder()
+                    .id(p.getId())                   // → /products/{id} (상세에서 핫딜·입찰)
+                    .name(p.getName())
+                    .price(a.getCurrentPrice())      // 현재가(실시간 입찰가)
+                    .imageUrl(p.getImageUrl())
+                    .brand(p.getBrand() != null ? p.getBrand().getName() : null)
+                    .build());
+            if (cards.size() >= RECOMMEND_LIMIT) break;
+        }
+
+        if (cards.isEmpty()) {
+            return ChatbotResponse.direct(AUCTION_REPLY, "RECOMMEND", false);
+        }
+
+        return ChatbotResponse.builder()
+                .answer("🔥 지금 진행 중인 경매예요! 카드의 '상품 보기'를 누르면 상세에서 "
+                        + "현재가를 확인하고 입찰하실 수 있어요. (마감 임박순)")
+                .intent("RECOMMEND").showAgent(false)
+                .sources(List.of()).cached(false)
+                .products(cards)
+                .build();
     }
 
     /** 인식 불가/모호 시 대표 문의 버튼 패널. */
