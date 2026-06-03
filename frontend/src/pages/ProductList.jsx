@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import { is3DReady } from '../utils/builder3d';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8081/api';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
 
 // productType → 한글 라벨 (페이지 상단 표시용)
 const CATEGORY_LABELS = {
@@ -138,6 +138,7 @@ function ProductCard({ product }) {
   const [thumb, setThumb] = useState(null);
   const [hover, setHover] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const [badgeHover, setBadgeHover] = useState(false);
 
   // glbUrl 이 있으면 3D 썸네일 시도, 없으면 image_url fallback
   useEffect(() => {
@@ -219,11 +220,33 @@ function ProductCard({ product }) {
             </div>
           )}
           {hasGlb && (
-            <span style={{
-              position: 'absolute', top: 8, right: 8,
-              background: '#6366f1', color: '#fff', fontSize: 11,
-              padding: '2px 8px', borderRadius: 4, fontWeight: 600,
-            }}>3D</span>
+            <span
+              role="button"
+              tabIndex={0}
+              title="3D 미리보기 — 키캡·케이스 색상 커스터마이징"
+              onClick={(e) => {
+                // 카드 전체는 상세(/products/:id)로 가지만, 이 뱃지는 3D 빌더로 진입.
+                // 상품 상세의 handle3DPreview 와 동일한 새 창 스펙(1400×900).
+                // 바깥 Link 클릭을 둘 다 막아야 함:
+                //   preventDefault → 네이티브 <a> 이동 취소, stopPropagation → React Router onClick 차단.
+                e.preventDefault();
+                e.stopPropagation();
+                window.open(`/builder/${product.id}`, '_blank', 'width=1400,height=900');
+              }}
+              onMouseEnter={() => setBadgeHover(true)}
+              onMouseLeave={() => setBadgeHover(false)}
+              style={{
+                position: 'absolute', top: 8, right: 8,
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                background: badgeHover ? '#4f46e5' : '#6366f1',
+                color: '#fff', fontSize: 11, fontWeight: 700,
+                padding: '4px 10px', borderRadius: 6,
+                cursor: 'pointer', whiteSpace: 'nowrap',
+                boxShadow: '0 1px 4px rgba(79,70,229,0.45)',
+              }}
+            >
+              ⌨️ 3D 미리보기
+            </span>
           )}
           {product.productType && product.productType !== 'KEYBOARD' && product.productType !== 'UNCLASSIFIED' && (
             <span style={{
@@ -343,6 +366,8 @@ export default function ProductList() {
   const productType = searchParams.get('productType') || null;
   const urlSearch = searchParams.get('search') || '';
   const subCategoryId = searchParams.get('subCategoryId') || null;
+  // FAB → /products?view=3d : 3D 미리보기 가능한 키보드(화이트리스트 15개)만 모아 보기 모드.
+  const is3DView = searchParams.get('view') === '3d';
 
   const [products, setProducts] = useState([]);
   const [totalElements, setTotalElements] = useState(0);
@@ -368,10 +393,10 @@ export default function ProductList() {
     return () => controller.abort();
   }, [productType]);
 
-  // 카테고리/검색/하위분류 변경 시 첫 페이지로
+  // 카테고리/검색/하위분류/3D모드 변경 시 첫 페이지로
   useEffect(() => {
     setPage(0);
-  }, [productType, urlSearch, subCategoryId]);
+  }, [productType, urlSearch, subCategoryId, is3DView]);
 
   // API 호출 (AbortController 로 race condition 방지)
   // React StrictMode dev 모드 이중 호출 + 빠른 탭/검색 전환 시
@@ -380,11 +405,19 @@ export default function ProductList() {
     const controller = new AbortController();
 
     const params = new URLSearchParams();
-    params.set('page', page);
-    params.set('size', PAGE_SIZE);
-    if (productType) params.set('productType', productType);
-    if (urlSearch) params.set('search', urlSearch);
-    if (subCategoryId) params.set('subCategoryId', subCategoryId);
+    if (is3DView) {
+      // 3D 화이트리스트(15개)는 프론트(builder3d.js)에만 존재 → 서버가 모름.
+      // 키보드 전체를 한 번에 받아 클라이언트에서 is3DReady 로 추린다. 페이징 없음.
+      params.set('page', 0);
+      params.set('size', 200);
+      params.set('productType', 'KEYBOARD');
+    } else {
+      params.set('page', page);
+      params.set('size', PAGE_SIZE);
+      if (productType) params.set('productType', productType);
+      if (urlSearch) params.set('search', urlSearch);
+      if (subCategoryId) params.set('subCategoryId', subCategoryId);
+    }
 
     const url = `${API_BASE}/products?${params.toString()}`;
 
@@ -398,9 +431,19 @@ export default function ProductList() {
       })
       .then((data) => {
         // PagedResponse<T> 응답 처리
-        setProducts(data.content || []);
-        setTotalElements(data.totalElements || 0);
-        setTotalPages(data.totalPages || 0);
+        const all = data.content || [];
+        if (is3DView) {
+          const only3d = all.filter(
+            (p) => is3DReady(p.glbUrl) && p.productType === 'KEYBOARD'
+          );
+          setProducts(only3d);
+          setTotalElements(only3d.length);
+          setTotalPages(1);
+        } else {
+          setProducts(all);
+          setTotalElements(data.totalElements || 0);
+          setTotalPages(data.totalPages || 0);
+        }
       })
       .catch((err) => {
         // 의도된 abort 는 무시 (다음 호출이 이미 시작됨)
@@ -415,7 +458,7 @@ export default function ProductList() {
       });
 
     return () => controller.abort();
-  }, [page, productType, urlSearch, subCategoryId]);
+  }, [page, productType, urlSearch, subCategoryId, is3DView]);
 
   const clearSearch = () => {
     const next = new URLSearchParams(searchParams);
@@ -476,6 +519,38 @@ export default function ProductList() {
         )}
       </p>
 
+      {is3DView && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 16, flexWrap: 'wrap',
+          padding: '16px 20px', marginBottom: 20,
+          background: '#eef2ff',
+          borderWidth: '1px', borderStyle: 'solid', borderColor: '#c7d2fe',
+          borderRadius: 12,
+        }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#3730a3', marginBottom: 4 }}>
+              ⌨️ 3D 미리보기 가능한 키보드
+            </div>
+            <div style={{ fontSize: 13, color: '#4f46e5' }}>
+              카드의 <strong>⌨️ 3D 미리보기</strong> 버튼을 누르면 3D로 돌려보고 키캡·케이스 색상을 직접 바꿔볼 수 있어요.
+            </div>
+          </div>
+          <Link
+            to="/products"
+            style={{
+              flexShrink: 0,
+              padding: '8px 14px', fontSize: 13, fontWeight: 600,
+              color: '#4f46e5', background: '#ffffff',
+              borderWidth: '1px', borderStyle: 'solid', borderColor: '#c7d2fe',
+              borderRadius: 8, textDecoration: 'none',
+            }}
+          >
+            전체 상품 보기
+          </Link>
+        </div>
+      )}
+
       {error && (
         <div style={{
           padding: 16, background: '#fef2f2', color: '#991b1b',
@@ -493,7 +568,8 @@ export default function ProductList() {
 
       {!loading && products.length === 0 && !error && (
         <div style={{ padding: 60, textAlign: 'center', color: '#71717a' }}>
-          {urlSearch ? `"${urlSearch}" 검색 결과가 없습니다.` :
+          {is3DView ? '3D 미리보기 가능한 키보드가 없습니다.' :
+           urlSearch ? `"${urlSearch}" 검색 결과가 없습니다.` :
            productType ? `${CATEGORY_LABELS[productType] || productType} 카테고리에 상품이 없습니다.` :
            '표시할 상품이 없습니다.'}
         </div>
@@ -513,7 +589,9 @@ export default function ProductList() {
             ))}
           </div>
 
-          <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+          {!is3DView && (
+            <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+          )}
         </>
       )}
     </div>

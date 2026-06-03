@@ -136,7 +136,7 @@ function Toast({ message, visible }) {
 
 // === HotdealCountdown — endAt 기반 카운트다운 (Phase 7 Round 4, 5/18) ===
 function HotdealCountdown({ endAt }) {
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
@@ -575,7 +575,7 @@ export default function ProductDetail() {
 
             {hasGlb && (
               <button onClick={handle3DPreview} style={S.previewBtn}>
-                <span style={{ fontSize: 16, marginRight: 8 }}>🧊</span>
+                <span style={{ fontSize: 16, marginRight: 8 }}>⌨️</span>
                 3D 미리보기
               </button>
             )}
