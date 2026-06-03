@@ -46,7 +46,12 @@ public class Product {
 
     private Integer price;
 
-    private Integer stock;
+    // 재고 — NOT NULL (V_stock: ALTER NOT NULL DEFAULT 0). importer/시드가 미지정 시
+    //   @Builder.Default 로 0 주입 (Integer 라 무명시 시 null → DB NOT NULL 거부 방지).
+    //   품절 판정은 stock=0 (B-1 방식, status 와 직교).
+    @Column(nullable = false)
+    @Builder.Default
+    private Integer stock = 0;
 
     @Column(unique = true)
     private String sourceId;
