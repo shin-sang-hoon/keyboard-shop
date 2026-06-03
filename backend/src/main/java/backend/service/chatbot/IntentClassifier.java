@@ -30,6 +30,7 @@ public class IntentClassifier {
         GREETING,   // 인사 → 고정 인사 응답
         ANGRY,      // 감정/불만 → 상담원 연결
         VAGUE,      // 모호 지칭사/부정 표현 → 되묻기
+        RECOMMEND,  // 상품 추천 요청 → 추천 카드 (ChatbotService 가 상품 조회)
         FAQ         // 일반 질문 → RAG 파이프라인(기본)
     }
 
@@ -79,6 +80,12 @@ public class IntentClassifier {
             Pattern.compile("^(안녕하세요|안녕하십니까|반갑습니다)")
     );
 
+    // ── 상품 추천 요청 (→ 추천 카드) ─────────────────────────────────────
+    // "추천/골라줘/뭐가 좋아/뭐 사" 등. ChatbotService 가 상품을 조회해 카드로 응답.
+    private static final List<Pattern> RECOMMEND_PATTERNS = List.of(
+            Pattern.compile("(추천|골라|뭐가 ?좋|뭐 ?살|뭘 ?살|뭐 ?사|뭘 ?사|사고 ?싶|찾고 ?있|어떤 ?거 ?좋|어떤 ?게 ?좋)")
+    );
+
     private static final String GREETING_REPLY =
             "안녕하세요! 스웨크론(SWACHRON) 키보드 도우미입니다 ⌨️ " +
             "스위치, 배열, 키캡, 브랜드, 가격, 3D 빌더 등 무엇이든 물어보세요!";
@@ -115,7 +122,12 @@ public class IntentClassifier {
             return new IntentResult(Intent.GREETING, GREETING_REPLY, false);
         }
 
-        // 4) 그 외 → RAG 파이프라인
+        // 4) 상품 추천 요청 → 추천 카드 (directReply 없음; ChatbotService 가 상품 조회해서 채움)
+        if (matchesAny(text, RECOMMEND_PATTERNS)) {
+            return new IntentResult(Intent.RECOMMEND, null, false);
+        }
+
+        // 5) 그 외 → RAG 파이프라인
         return IntentResult.faq();
     }
 

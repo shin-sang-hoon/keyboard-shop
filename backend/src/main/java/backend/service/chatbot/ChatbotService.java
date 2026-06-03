@@ -2,12 +2,15 @@ package backend.service.chatbot;
 
 import backend.dto.chatbot.ChatbotResponse;
 import backend.entity.ChatbotQa;
+import backend.entity.Product;
 import backend.entity.UnknownQueryLog;
 import backend.repository.ChatbotQaRepository;
+import backend.repository.ProductRepository;
 import backend.repository.UnknownQueryLogRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -20,17 +23,18 @@ import java.util.List;
  * 챗봇 서비스 본체 — RAG(키워드 검색 + Gemini 답변 생성) 파이프라인.
  *
  * 처리 흐름(answer):
- *   0) Redis 캐시 조회(질문 정규화 키, 24h) — 있으면 즉시 반환(LLM 호출 절약)
- *   1) IntentClassifier 분기
- *        - ANGRY  → 상담원 연결 안내(LLM 미호출) + 미답변 로깅(reason=ANGRY)
- *        - VAGUE  → 되묻기(LLM 미호출)
+ *   1) IntentClassifier 분기 (캐시보다 먼저)
+ *        - ANGRY    → 상담원 연결 안내(LLM 미호출) + 미답변 로깅(reason=ANGRY)
+ *        - VAGUE    → 되묻기(LLM 미호출)
  *        - GREETING → 고정 인사(LLM 미호출)
- *        - FAQ    → 2)로
- *   2) 키워드 스코어링으로 후보 Q&A top-N 선별
+ *        - RECOMMEND→ 상품 추천 카드(productRepository 조회, 캐시 미사용)
+ *        - FAQ      → 2)로
+ *   2) Redis 캐시 조회(FAQ 한정, 질문 정규화 키, 24h) — 있으면 즉시 반환(LLM 호출 절약)
+ *   3) 키워드 스코어링으로 후보 Q&A top-N 선별
  *        - 매칭 0건 → 폴백(고객센터) + 미답변 로깅(reason=NO_MATCH)
- *   3) 후보 Q&A 를 컨텍스트(systemInstruction)로 Gemini 답변 생성
+ *   4) 후보 Q&A 를 컨텍스트(systemInstruction)로 Gemini 답변 생성
  *        - LLM 실패(null) → 최상위 Q&A 의 원문 answer 로 폴백(graceful degradation)
- *   4) 생성 답변을 Redis 에 24h 캐시 후 반환
+ *   5) 생성 답변을 Redis 에 24h 캐시 후 반환
  *
  * 설계 메모:
  *   - 캐시 값은 단순 문자열(answer) → RedisConfig 의 activateDefaultTyping 영향 없이 안전.
@@ -47,12 +51,15 @@ public class ChatbotService {
     private final ChatbotLlmClient llmClient;
     private final RedisTemplate<String, Object> redisTemplate;
     private final IntentClassifier intentClassifier;
+    private final ProductRepository productRepository;
 
     @Value("${chatbot.cache.ttl-hours:24}")
     private long cacheTtlHours;
 
     /** 컨텍스트로 넘길 후보 Q&A 최대 개수. */
     private static final int TOP_N = 4;
+    /** 추천 카드로 보여줄 상품 최대 개수. */
+    private static final int RECOMMEND_LIMIT = 6;
     /** 캐시 키 접두사. */
     private static final String CACHE_PREFIX = "chatbot:answer:";
 
@@ -69,20 +76,7 @@ public class ChatbotService {
                     "VAGUE", false);
         }
 
-        // 0) 캐시 조회 (의도 분기보다 먼저 — 반복 FAQ 를 빠르게)
-        String cacheKey = CACHE_PREFIX + normalize(question);
-        try {
-            Object cached = redisTemplate.opsForValue().get(cacheKey);
-            if (cached instanceof String s && !s.isBlank()) {
-                return ChatbotResponse.builder()
-                        .answer(s).intent("FAQ").showAgent(false)
-                        .sources(List.of()).cached(true).build();
-            }
-        } catch (Exception e) {
-            log.warn("[Chatbot] 캐시 조회 실패(무시하고 진행): {}", e.getMessage());
-        }
-
-        // 1) 의도 분기
+        // 1) 의도 분기 (캐시보다 먼저 — RECOMMEND/ANGRY 등은 캐시를 타지 않음)
         IntentClassifier.IntentResult intent = intentClassifier.classify(question);
         switch (intent.getIntent()) {
             case ANGRY -> {
@@ -95,10 +89,26 @@ public class ChatbotService {
             case GREETING -> {
                 return ChatbotResponse.direct(intent.getDirectReply(), "GREETING", false);
             }
-            default -> { /* FAQ → 아래 RAG 진행 */ }
+            case RECOMMEND -> {
+                return recommendProducts(question);
+            }
+            default -> { /* FAQ → 아래 캐시 + RAG 진행 */ }
         }
 
-        // 2) 키워드 스코어링으로 후보 Q&A 선별
+        // 2) 캐시 조회 (FAQ 한정 — 반복 FAQ 를 빠르게)
+        String cacheKey = CACHE_PREFIX + normalize(question);
+        try {
+            Object cached = redisTemplate.opsForValue().get(cacheKey);
+            if (cached instanceof String s && !s.isBlank()) {
+                return ChatbotResponse.builder()
+                        .answer(s).intent("FAQ").showAgent(false)
+                        .sources(List.of()).cached(true).build();
+            }
+        } catch (Exception e) {
+            log.warn("[Chatbot] 캐시 조회 실패(무시하고 진행): {}", e.getMessage());
+        }
+
+        // 3) 키워드 스코어링으로 후보 Q&A 선별
         List<ScoredQa> ranked = rankByKeyword(question);
         if (ranked.isEmpty()) {
             logUnknown(question, "NO_MATCH", 0);
@@ -111,11 +121,11 @@ public class ChatbotService {
         List<String> sourceIds = new ArrayList<>();
         for (ScoredQa sq : top) sourceIds.add(sq.qa.getId());
 
-        // 3) RAG: 후보 Q&A 를 컨텍스트로 Gemini 답변 생성
+        // 4) RAG: 후보 Q&A 를 컨텍스트로 Gemini 답변 생성
         String systemInstruction = buildSystemInstruction(top);
         String generated = llmClient.generate(systemInstruction, question);
 
-        // 3-폴백) LLM 실패 → 최상위 Q&A 원문으로 graceful degradation
+        // 4-폴백) LLM 실패 → 최상위 Q&A 원문으로 graceful degradation
         if (generated == null || generated.isBlank()) {
             logUnknown(question, "LLM_FALLBACK", top.get(0).score);
             String fallbackAnswer = top.get(0).qa.getAnswer();
@@ -124,7 +134,7 @@ public class ChatbotService {
                     .sources(sourceIds).cached(false).build();
         }
 
-        // 4) 캐시 저장 후 반환
+        // 5) 캐시 저장 후 반환
         try {
             redisTemplate.opsForValue().set(cacheKey, generated, Duration.ofHours(cacheTtlHours));
         } catch (Exception e) {
@@ -142,6 +152,42 @@ public class ChatbotService {
      */
     public boolean isLlmHealthy() {
         return !(llmClient instanceof GeminiChatbotClient gemini) || gemini.isHealthy();
+    }
+
+    // ── 상품 추천 ────────────────────────────────────────────────────────
+    /**
+     * 추천 의도일 때 ACTIVE 키보드 대표 상품을 카드로 반환(캐시 안 탐 — 상품은 가변이라).
+     * 컬럼이 대부분 NULL이라 일단 전체 키보드에서 GLB 보유·id 순 상위 N개를 보여준다(B).
+     * (C 특성 추천에서 keyword 로 name LIKE 필터를 추가할 예정.)
+     */
+    private ChatbotResponse recommendProducts(String question) {
+        List<Product> found = productRepository.findRecommendations(
+                Product.ProductType.KEYBOARD, null, PageRequest.of(0, RECOMMEND_LIMIT));
+
+        if (found.isEmpty()) {
+            return ChatbotResponse.builder()
+                    .answer("지금 추천드릴 키보드를 찾지 못했어요. 상품 목록에서 직접 둘러봐 주세요!")
+                    .intent("RECOMMEND").showAgent(false)
+                    .sources(List.of()).cached(false).build();
+        }
+
+        List<ChatbotResponse.ProductCard> cards = new ArrayList<>();
+        for (Product p : found) {
+            cards.add(ChatbotResponse.ProductCard.builder()
+                    .id(p.getId())
+                    .name(p.getName())
+                    .price(p.getPrice())
+                    .imageUrl(p.getImageUrl())
+                    .brand(p.getBrand() != null ? p.getBrand().getName() : null)
+                    .build());
+        }
+
+        return ChatbotResponse.builder()
+                .answer("마음에 드실 만한 키보드를 골라봤어요! 카드의 '상품 보기'를 누르면 자세히 확인하실 수 있어요 😊")
+                .intent("RECOMMEND").showAgent(false)
+                .sources(List.of()).cached(false)
+                .products(cards)
+                .build();
     }
 
     // ── 키워드 스코어링 ──────────────────────────────────────────────────

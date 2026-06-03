@@ -25,6 +25,8 @@ public class ChatbotResponse {
     private final boolean showAgent;
     private final List<String> sources;
     private final boolean cached;
+    /** 추천 상품 카드 (RECOMMEND 의도일 때만 채워짐, 그 외엔 null → 프론트가 렌더 생략). */
+    private final List<ProductCard> products;
 
     public static ChatbotResponse direct(String answer, String intent, boolean showAgent) {
         return ChatbotResponse.builder()
@@ -34,5 +36,17 @@ public class ChatbotResponse {
                 .sources(List.of())
                 .cached(false)
                 .build();
+    }
+
+    /** 프론트 상품 카드 1개 (썸네일·브랜드·상품명·가격 + 상세 이동용 id). */
+    @Getter
+    @Builder
+    @AllArgsConstructor
+    public static class ProductCard {
+        private final Long id;
+        private final String name;
+        private final Integer price;
+        private final String imageUrl;
+        private final String brand;   // 브랜드명 문자열(없으면 null)
     }
 }

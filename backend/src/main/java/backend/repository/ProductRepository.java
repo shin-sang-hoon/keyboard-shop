@@ -77,6 +77,23 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             @Param("subCategoryId") Long subCategoryId,
             Pageable pageable);
 
+    // ─── 챗봇 상품 추천 (B, 6/03) ────────────────────────────────────────
+    /**
+     * 챗봇 추천용 — ACTIVE + 지정 productType, 이름 키워드(선택) 매칭.
+     *  - keyword == null/'' → 해당 타입 전체에서 GLB 보유 우선·id 순(대표 상품).
+     *  - keyword 지정(C 특성 추천) → 상품명 LIKE 필터.
+     * switch_type 등 구조 컬럼이 대부분 NULL이라 name LIKE 를 메인 신호로 사용.
+     * limit 은 Pageable(PageRequest.of(0, N))로 제어.
+     */
+    @EntityGraph(attributePaths = {"brand", "category"})
+    @Query("SELECT p FROM Product p WHERE p.status = 'ACTIVE' AND p.productType = :productType " +
+           "AND (:keyword IS NULL OR :keyword = '' OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+           "ORDER BY CASE WHEN (p.glbUrl IS NULL OR p.glbUrl = '') THEN 1 ELSE 0 END ASC, p.id ASC")
+    List<Product> findRecommendations(
+            @Param("productType") ProductType productType,
+            @Param("keyword") String keyword,
+            Pageable pageable);
+
     // ─── 7-G 라운드 3 (5/24): 관리자 대시보드 통계 ──────────────────────
     /**
      * 상태별 상품 개수. Spring Data JPA 메서드명 파생 쿼리.
