@@ -255,7 +255,7 @@ function ProductCard({ product }) {
               padding: '2px 6px', borderRadius: 4, fontWeight: 500,
             }}>
               {product.productType === 'KEYCAP' ? '키캡' :
-               product.productType === 'SWITCH_PART' ? '부품' :
+               product.productType === 'SWITCH_PART' ? '스위치' :
                product.productType === 'ACCESSORY' ? '액세서리' : ''}
             </span>
           )}
