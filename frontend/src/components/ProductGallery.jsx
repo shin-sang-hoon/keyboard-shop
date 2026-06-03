@@ -42,29 +42,43 @@ import { useEffect, useRef, useState } from 'react';
  */
 export default function ProductGallery({ images = [], fallbackImageUrl }) {
   const [activeIndex, setActiveIndex] = useState(0);
-  const [imgError, setImgError] = useState({});  // index -> boolean
+  const [failed, setFailed] = useState({});  // imageUrl -> true (로드 실패한 죽은 이미지)
   const [zoomOpen, setZoomOpen] = useState(false); // C4 줌 모달
   const containerRef = useRef(null);
   const triggerRef = useRef(null); // C4: 모달 닫을 때 포커스 복귀 대상
 
-  // ─── 표시할 이미지 리스트 결정 ──────────────────────────────────────────
-  const displayImages =
+  // ─── 표시 후보 (images 우선, 없으면 fallback) ──────────────────────────
+  const sourceImages =
     images && images.length > 0
       ? images
       : fallbackImageUrl
       ? [{ id: 'fallback', imageUrl: fallbackImageUrl, displayOrder: 0 }]
       : [];
 
+  // 로드 실패(404·핫링크 차단 등 죽은 크롤링 URL)한 이미지는 목록에서 제외
+  // → 메인/썸네일/카운터/모달 어디에도 엑박·빈 슬롯이 안 보이게 (graceful degradation)
+  const displayImages = sourceImages.filter(
+    (img) => img.imageUrl && !failed[img.imageUrl]
+  );
+
   const total = displayImages.length;
   const hasMultiple = total > 1;
-  const safeIndex = Math.min(activeIndex, total - 1);
+  const safeIndex = Math.min(activeIndex, Math.max(total - 1, 0));
   const activeImage = displayImages[safeIndex];
+
+  const markFailed = (url) =>
+    setFailed((prev) => (url && !prev[url] ? { ...prev, [url]: true } : prev));
 
   // ─── images prop 변경 시 첫 이미지로 리셋 ────────────────────────────
   useEffect(() => {
     setActiveIndex(0);
-    setImgError({});
+    setFailed({});
   }, [images]);
+
+  // ─── 목록 축소(죽은 이미지 제외)로 activeIndex 가 범위를 벗어나면 보정 ──
+  useEffect(() => {
+    if (activeIndex > total - 1) setActiveIndex(Math.max(total - 1, 0));
+  }, [total, activeIndex]);
 
   // ─── 키보드 ← / → 네비게이션 (갤러리 영역, 모달 닫혔을 때만) ────────
   useEffect(() => {
@@ -88,12 +102,12 @@ export default function ProductGallery({ images = [], fallbackImageUrl }) {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [hasMultiple, total, zoomOpen]);
 
-  // ─── 빈 케이스 ────────────────────────────────────────────────────────
+  // ─── 빈 케이스 (이미지 없음 또는 전부 로드 실패) ──────────────────────
   if (total === 0) {
     return (
       <div style={S.container}>
         <div style={S.mainBox}>
-          <div style={S.placeholder}>이미지가 준비되지 않았습니다</div>
+          <div style={S.placeholder}>이미지를 불러올 수 없습니다</div>
         </div>
       </div>
     );
@@ -133,20 +147,14 @@ export default function ProductGallery({ images = [], fallbackImageUrl }) {
           onClick={handleOpenZoom}
           style={S.mainImageButton}
           aria-label={`${safeIndex + 1}번째 이미지 크게 보기`}
-          disabled={imgError[safeIndex] || !activeImage.imageUrl}
+          disabled={!activeImage?.imageUrl}
         >
-          {imgError[safeIndex] || !activeImage.imageUrl ? (
-            <div style={S.placeholder}>이미지를 불러올 수 없습니다</div>
-          ) : (
-            <img
-              src={activeImage.imageUrl}
-              alt={`상품 이미지 ${safeIndex + 1} / ${total}`}
-              onError={() =>
-                setImgError((prev) => ({ ...prev, [safeIndex]: true }))
-              }
-              style={S.mainImage}
-            />
-          )}
+          <img
+            src={activeImage.imageUrl}
+            alt={`상품 이미지 ${safeIndex + 1} / ${total}`}
+            onError={() => markFailed(activeImage.imageUrl)}
+            style={S.mainImage}
+          />
         </button>
 
         {/* 좌우 화살표 (2장 이상일 때만) */}
@@ -187,11 +195,10 @@ export default function ProductGallery({ images = [], fallbackImageUrl }) {
         <div style={S.thumbRow} role="tablist" aria-label="썸네일 선택">
           {displayImages.map((img, idx) => {
             const isActive = idx === safeIndex;
-            const isErr = imgError[idx];
 
             return (
               <button
-                key={img.id ?? idx}
+                key={img.id ?? img.imageUrl ?? idx}
                 onClick={() => setActiveIndex(idx)}
                 role="tab"
                 aria-selected={isActive}
@@ -204,18 +211,12 @@ export default function ProductGallery({ images = [], fallbackImageUrl }) {
                   opacity: isActive ? 1 : 0.6,
                 }}
               >
-                {isErr || !img.imageUrl ? (
-                  <div style={S.thumbPlaceholder}>×</div>
-                ) : (
-                  <img
-                    src={img.imageUrl}
-                    alt=""
-                    onError={() =>
-                      setImgError((prev) => ({ ...prev, [idx]: true }))
-                    }
-                    style={S.thumbImage}
-                  />
-                )}
+                <img
+                  src={img.imageUrl}
+                  alt=""
+                  onError={() => markFailed(img.imageUrl)}
+                  style={S.thumbImage}
+                />
               </button>
             );
           })}
