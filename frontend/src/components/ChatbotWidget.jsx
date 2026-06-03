@@ -32,9 +32,8 @@ const CATEGORY_BUTTONS = [
   { label: '📞 상담원 연결', query: '__AGENT__' },
 ];
 
-// 상담원 연결 버튼 클릭 시 (백엔드 호출 없이 즉시 안내)
-const AGENT_MSG =
-  '상담이 필요하시면 아래 상담원 연결 버튼을 이용하시거나 고객센터(010-6824-7715)로 연락 주세요.';
+// 특수 토큰(버튼 query) → 말풍선에 표시할 라벨. 백엔드엔 토큰 그대로 전송.
+const TOKEN_LABELS = { __AGENT__: '상담원 연결', __AUCTION__: '핫딜 경매' };
 
 const WELCOME = '안녕하세요! 스웨크론 AI 도우미 크론이예요 🤖 스위치·배열·키캡·브랜드·가격·3D 빌더, 무엇이든 물어보세요!';
 
@@ -80,7 +79,9 @@ export default function ChatbotWidget({ open, onClose }) {
     const msg = (text ?? '').trim();
     if (!msg || loading) return;
 
-    setMessages((prev) => [...prev, { id: nextId(), sender: 'me', text: msg, time: nowTime() }]);
+    // 말풍선엔 보기 좋은 라벨(토큰이면 매핑), 백엔드엔 원시 토큰 그대로 전송
+    const displayText = TOKEN_LABELS[msg] || msg;
+    setMessages((prev) => [...prev, { id: nextId(), sender: 'me', text: displayText, time: nowTime() }]);
     setInput('');
     setLoading(true);
 
@@ -121,15 +122,8 @@ export default function ChatbotWidget({ open, onClose }) {
     }
   }, [loading]);
 
-  // 카테고리 버튼 클릭: 상담원 연결은 즉시 안내, 그 외엔 관련 질문 전송
+  // 카테고리 버튼 클릭: 패널 버튼과 동일하게 query 전송 (상담원=__AGENT__ → 백엔드 통일 처리)
   function handleCategory(btn) {
-    if (btn.query === '__AGENT__') {
-      setMessages((prev) => [
-        ...prev,
-        { id: nextId(), sender: 'bot', text: AGENT_MSG, showAgent: true, time: nowTime() },
-      ]);
-      return;
-    }
     send(btn.query);
   }
 

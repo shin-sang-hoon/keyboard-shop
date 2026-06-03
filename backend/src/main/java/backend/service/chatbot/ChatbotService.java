@@ -18,6 +18,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * 챗봇 서비스 본체 — RAG(키워드 검색 + Gemini 답변 생성) 파이프라인.
@@ -60,6 +61,26 @@ public class ChatbotService {
     private static final int TOP_N = 4;
     /** 추천 카드로 보여줄 상품 최대 개수. */
     private static final int RECOMMEND_LIMIT = 6;
+
+    /** 특성 추천 매핑 — (질문에서 찾을 표현, 사용자에게 보일 라벨, 상품명 LIKE 키워드). */
+    private record RecKeyword(Pattern pattern, String label, String nameKeyword) {}
+
+    /**
+     * 추천 특성 사전. 상품명에 실제로 존재하는 토큰만 키워드로 사용(DB 분포 기반).
+     *  - 존재 충분: 저소음(15)·무선(16)·적축(4)·75(23)·65(15)
+     *  - 청축/갈축/은축은 상품명에 0건 → 매칭돼도 결과 0 → recommendProducts 가 인기 키보드로 폴백.
+     * 첫 매칭이 우선(단일 특성 질의가 대부분).
+     */
+    private static final List<RecKeyword> RECOMMEND_KEYWORDS = List.of(
+            new RecKeyword(Pattern.compile("저소음|무소음|조용|사무|도서관|소음"), "저소음", "저소음"),
+            new RecKeyword(Pattern.compile("무선|블루투스|블투|wireless"),        "무선", "무선"),
+            new RecKeyword(Pattern.compile("게임|게이밍|적축|빠른|속도"),         "적축(게이밍)", "적축"),
+            new RecKeyword(Pattern.compile("75"),                               "75% 배열", "75"),
+            new RecKeyword(Pattern.compile("65|미니|컴팩트"),                    "65% 배열", "65"),
+            new RecKeyword(Pattern.compile("청축|클릭|타건감"),                  "청축", "청축"),
+            new RecKeyword(Pattern.compile("갈축|텍타일"),                       "갈축", "갈축"),
+            new RecKeyword(Pattern.compile("은축|스피드축"),                     "은축", "은축")
+    );
     /** 캐시 키 접두사. */
     private static final String CACHE_PREFIX = "chatbot:answer:";
 
@@ -68,12 +89,47 @@ public class ChatbotService {
             "스위치·배열·키캡·브랜드·가격·3D 빌더 관련해서 다시 질문해 주시거나, " +
             "자세한 상담은 고객센터(010-6824-7715)로 문의해 주세요.";
 
+    private static final String AGENT_REPLY =
+            "상담원 연결을 도와드릴게요! 아래 전화번호로 연락 주시면 빠르게 안내해 드립니다. ☎️";
+    private static final String AUCTION_REPLY =
+            "진행 중인 핫딜 경매는 상단 메뉴의 'Auctions(경매)'에서 확인하실 수 있어요! " +
+            "실시간 입찰가와 남은 시간을 함께 보실 수 있습니다. 🔥";
+
+    /** 상품 카테고리 선택 패널 — 클릭 시 종류별 추천 카드로 이어짐(핫딜경매는 안내). */
+    private static final List<ChatbotResponse.QuickButton> PRODUCT_CATEGORY_BUTTONS = List.of(
+            new ChatbotResponse.QuickButton("⌨️ 키보드", "키보드 추천"),
+            new ChatbotResponse.QuickButton("🔠 키캡", "키캡 추천"),
+            new ChatbotResponse.QuickButton("🔘 스위치", "스위치 추천"),
+            new ChatbotResponse.QuickButton("🎧 악세서리", "악세서리 추천"),
+            new ChatbotResponse.QuickButton("🔥 핫딜 경매", "__AUCTION__")
+    );
+
+    /** 도움(대표 문의) 패널 — 인식 불가/모호 시 노출. 각 query 는 FAQ·상품패널·상담원으로 라우팅. */
+    private static final List<ChatbotResponse.QuickButton> HELP_CATEGORY_BUTTONS = List.of(
+            new ChatbotResponse.QuickButton("🔨 입찰 참여", "경매(입찰)는 어떻게 참여하나요?"),
+            new ChatbotResponse.QuickButton("🚚 배송", "배송은 얼마나 걸리나요?"),
+            new ChatbotResponse.QuickButton("🔄 취소·교환·반품", "주문 취소나 교환은 어떻게 하나요?"),
+            new ChatbotResponse.QuickButton("🛠️ 상품 A/S", "상품 A/S는 어떻게 하나요?"),
+            new ChatbotResponse.QuickButton("🛍️ 상품 문의", "상품 추천해줘"),
+            new ChatbotResponse.QuickButton("💳 주문·결제", "어떤 결제 수단을 쓸 수 있나요?"),
+            new ChatbotResponse.QuickButton("👤 회원 정보", "회원가입은 무료인가요?"),
+            new ChatbotResponse.QuickButton("📞 상담원 연결", "__AGENT__")
+    );
+
     public ChatbotResponse answer(String rawQuestion) {
         String question = (rawQuestion == null) ? "" : rawQuestion.strip();
         if (question.isEmpty()) {
             return ChatbotResponse.direct(
                     "궁금한 점을 입력해 주세요! 스위치, 배열, 키캡, 브랜드, 가격, 3D 빌더 무엇이든 좋아요 😊",
                     "VAGUE", false);
+        }
+
+        // 0) 특수 토큰(버튼에서 전송) — 상담원 연결 / 핫딜 경매 안내
+        if ("__AGENT__".equals(question)) {
+            return ChatbotResponse.direct(AGENT_REPLY, "AGENT", true);
+        }
+        if ("__AUCTION__".equals(question)) {
+            return ChatbotResponse.direct(AUCTION_REPLY, "RECOMMEND", false);
         }
 
         // 1) 의도 분기 (캐시보다 먼저 — RECOMMEND/ANGRY 등은 캐시를 타지 않음)
@@ -84,7 +140,7 @@ public class ChatbotService {
                 return ChatbotResponse.direct(intent.getDirectReply(), "ANGRY", true);
             }
             case VAGUE -> {
-                return ChatbotResponse.direct(intent.getDirectReply(), "VAGUE", false);
+                return helpPanel("어떤 것이 궁금하신가요? 아래에서 골라 주세요 😊");
             }
             case GREETING -> {
                 return ChatbotResponse.direct(intent.getDirectReply(), "GREETING", false);
@@ -112,9 +168,7 @@ public class ChatbotService {
         List<ScoredQa> ranked = rankByKeyword(question);
         if (ranked.isEmpty()) {
             logUnknown(question, "NO_MATCH", 0);
-            return ChatbotResponse.builder()
-                    .answer(FALLBACK_REPLY).intent("FAQ").showAgent(true)
-                    .sources(List.of()).cached(false).build();
+            return helpPanel("음, 정확히 이해하지 못했어요 😅 아래에서 골라 주시면 빠르게 도와드릴게요!");
         }
 
         List<ScoredQa> top = ranked.subList(0, Math.min(TOP_N, ranked.size()));
@@ -156,23 +210,102 @@ public class ChatbotService {
 
     // ── 상품 추천 ────────────────────────────────────────────────────────
     /**
-     * 추천 의도일 때 ACTIVE 키보드 대표 상품을 카드로 반환(캐시 안 탐 — 상품은 가변이라).
-     * 컬럼이 대부분 NULL이라 일단 전체 키보드에서 GLB 보유·id 순 상위 N개를 보여준다(B).
-     * (C 특성 추천에서 keyword 로 name LIKE 필터를 추가할 예정.)
+     * 추천 의도 처리(캐시 안 탐 — 상품은 가변).
+     *   - 종류 미지정 + 특성 없음(="상품 추천"/"상품 문의") → 상품 카테고리 선택 패널(버튼).
+     *   - 종류 지정(키보드/키캡/스위치/악세서리) → 해당 종류 카드. 키보드는 특성(저소음/무선/75…) 추가 필터.
+     *   - 특성만 있고 종류 미지정 → 키보드로 간주. 특성 0건 → 인기 상품 폴백.
+     * 상품명 LIKE 가 메인 신호(구조 컬럼 대부분 NULL).
      */
     private ChatbotResponse recommendProducts(String question) {
-        List<Product> found = productRepository.findRecommendations(
-                Product.ProductType.KEYBOARD, null, PageRequest.of(0, RECOMMEND_LIMIT));
+        String q = question.toLowerCase();
 
+        // 1) 상품 종류 감지(키보드/키캡/스위치/악세서리)
+        Product.ProductType type = detectProductType(q);
+
+        // 2) 특성 감지(키보드 한정). 종류 미지정인데 특성만 있으면 키보드로 간주.
+        String matchedLabel = null;
+        String keyword = null;
+        if (type == null || type == Product.ProductType.KEYBOARD) {
+            for (RecKeyword rk : RECOMMEND_KEYWORDS) {
+                if (rk.pattern().matcher(q).find()) {
+                    matchedLabel = rk.label();
+                    keyword = rk.nameKeyword();
+                    break;
+                }
+            }
+            if (type == null && keyword != null) {
+                type = Product.ProductType.KEYBOARD;
+            }
+        }
+
+        // 3) 종류·특성 모두 없음(="상품 추천"/"상품 문의") → 상품 카테고리 선택 패널
+        if (type == null) {
+            return ChatbotResponse.builder()
+                    .answer("어떤 상품을 찾으시나요? 아래에서 골라 주세요 😊")
+                    .intent("RECOMMEND").showAgent(false)
+                    .sources(List.of()).cached(false)
+                    .quickButtons(PRODUCT_CATEGORY_BUTTONS)
+                    .build();
+        }
+
+        // 4) 종류 카드 조회 (특성 키워드 + 0건 폴백)
+        List<Product> found = productRepository.findRecommendations(
+                type, keyword, PageRequest.of(0, RECOMMEND_LIMIT));
+        boolean fellBack = false;
+        if (found.isEmpty() && keyword != null) {
+            found = productRepository.findRecommendations(
+                    type, null, PageRequest.of(0, RECOMMEND_LIMIT));
+            fellBack = true;
+        }
         if (found.isEmpty()) {
             return ChatbotResponse.builder()
-                    .answer("지금 추천드릴 키보드를 찾지 못했어요. 상품 목록에서 직접 둘러봐 주세요!")
+                    .answer("지금 추천드릴 상품을 찾지 못했어요. 상품 목록에서 직접 둘러봐 주세요!")
                     .intent("RECOMMEND").showAgent(false)
                     .sources(List.of()).cached(false).build();
         }
 
+        // 5) 상황별 인트로 + 카드
+        String label = typeLabel(type);
+        String intro;
+        if (matchedLabel != null && !fellBack) {
+            intro = "'" + matchedLabel + "' " + label + " 위주로 골라봤어요! 카드의 '상품 보기'로 자세히 확인하실 수 있어요 😊";
+        } else if (matchedLabel != null) {
+            intro = "'" + matchedLabel + "' " + label + "는 지금 딱 맞는 게 없어서, 대신 인기 " + label + "를 보여드릴게요!";
+        } else {
+            intro = "추천 " + label + "를 보여드릴게요! 카드의 '상품 보기'를 누르면 자세히 확인하실 수 있어요 😊";
+        }
+
+        return ChatbotResponse.builder()
+                .answer(intro).intent("RECOMMEND").showAgent(false)
+                .sources(List.of()).cached(false)
+                .products(toCards(found))
+                .build();
+    }
+
+    /** 질문에서 상품 종류 추출(키보드 우선). 못 찾으면 null. */
+    private Product.ProductType detectProductType(String q) {
+        if (q.contains("키보드")) return Product.ProductType.KEYBOARD;
+        if (q.contains("키캡")) return Product.ProductType.KEYCAP;
+        if (q.contains("스위치")) return Product.ProductType.SWITCH_PART;
+        if (q.contains("악세서리") || q.contains("악세사리")
+                || q.contains("액세서리") || q.contains("엑세서리")) return Product.ProductType.ACCESSORY;
+        return null;
+    }
+
+    /** 종류 → 사용자 표기. */
+    private String typeLabel(Product.ProductType type) {
+        return switch (type) {
+            case KEYCAP -> "키캡";
+            case SWITCH_PART -> "스위치";
+            case ACCESSORY -> "악세서리";
+            default -> "키보드";
+        };
+    }
+
+    /** Product 리스트 → 프론트 카드 리스트. */
+    private List<ChatbotResponse.ProductCard> toCards(List<Product> products) {
         List<ChatbotResponse.ProductCard> cards = new ArrayList<>();
-        for (Product p : found) {
+        for (Product p : products) {
             cards.add(ChatbotResponse.ProductCard.builder()
                     .id(p.getId())
                     .name(p.getName())
@@ -181,12 +314,15 @@ public class ChatbotService {
                     .brand(p.getBrand() != null ? p.getBrand().getName() : null)
                     .build());
         }
+        return cards;
+    }
 
+    /** 인식 불가/모호 시 대표 문의 버튼 패널. */
+    private ChatbotResponse helpPanel(String message) {
         return ChatbotResponse.builder()
-                .answer("마음에 드실 만한 키보드를 골라봤어요! 카드의 '상품 보기'를 누르면 자세히 확인하실 수 있어요 😊")
-                .intent("RECOMMEND").showAgent(false)
+                .answer(message).intent("HELP").showAgent(false)
                 .sources(List.of()).cached(false)
-                .products(cards)
+                .quickButtons(HELP_CATEGORY_BUTTONS)
                 .build();
     }
 

@@ -27,6 +27,8 @@ public class ChatbotResponse {
     private final boolean cached;
     /** 추천 상품 카드 (RECOMMEND 의도일 때만 채워짐, 그 외엔 null → 프론트가 렌더 생략). */
     private final List<ProductCard> products;
+    /** 카테고리·상품선택 버튼 (패널 응답일 때만 채워짐, 그 외 null). 클릭 시 query 가 재전송됨. */
+    private final List<QuickButton> quickButtons;
 
     public static ChatbotResponse direct(String answer, String intent, boolean showAgent) {
         return ChatbotResponse.builder()
@@ -48,5 +50,13 @@ public class ChatbotResponse {
         private final Integer price;
         private final String imageUrl;
         private final String brand;   // 브랜드명 문자열(없으면 null)
+    }
+
+    /** 패널 버튼 1개 — label(표시) + query(클릭 시 챗봇에 재전송될 문장). */
+    @Getter
+    @AllArgsConstructor
+    public static class QuickButton {
+        private final String label;
+        private final String query;
     }
 }

@@ -80,10 +80,10 @@ public class IntentClassifier {
             Pattern.compile("^(안녕하세요|안녕하십니까|반갑습니다)")
     );
 
-    // ── 상품 추천 요청 (→ 추천 카드) ─────────────────────────────────────
-    // "추천/골라줘/뭐가 좋아/뭐 사" 등. ChatbotService 가 상품을 조회해 카드로 응답.
+    // ── 상품 추천 요청 (→ 추천 카드 / 상품 카테고리 패널) ─────────────────
+    // "추천/골라줘/뭐가 좋아/뭐 사" + "상품 문의/상품 관련"(상품문의 버튼). ChatbotService 가 분기.
     private static final List<Pattern> RECOMMEND_PATTERNS = List.of(
-            Pattern.compile("(추천|골라|뭐가 ?좋|뭐 ?살|뭘 ?살|뭐 ?사|뭘 ?사|사고 ?싶|찾고 ?있|어떤 ?거 ?좋|어떤 ?게 ?좋)")
+            Pattern.compile("(추천|골라|뭐가 ?좋|뭐 ?살|뭘 ?살|뭐 ?사|뭘 ?사|사고 ?싶|찾고 ?있|어떤 ?거 ?좋|어떤 ?게 ?좋|상품 ?문의|상품 ?관련)")
     );
 
     private static final String GREETING_REPLY =
