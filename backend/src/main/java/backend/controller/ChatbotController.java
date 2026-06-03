@@ -35,7 +35,8 @@ public class ChatbotController {
     public ResponseEntity<Map<String, Object>> health() {
         return ResponseEntity.ok(Map.of(
                 "status", "ok",
-                "service", "chatbot"
+                "service", "chatbot",
+                "gemini", chatbotService.isLlmHealthy()
         ));
     }
 }

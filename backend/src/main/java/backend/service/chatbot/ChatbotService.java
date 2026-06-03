@@ -136,6 +136,14 @@ public class ChatbotService {
                 .sources(sourceIds).cached(false).build();
     }
 
+    /**
+     * 챗봇 LLM(Gemini) 가용 여부 — Controller 의 /health 가 호출해 프론트 온라인/오프라인 점에 사용.
+     * GeminiChatbotClient 면 실제 상태(키 설정 + 직전 호출 성공), 그 외 구현이면 가용(true)으로 간주.
+     */
+    public boolean isLlmHealthy() {
+        return !(llmClient instanceof GeminiChatbotClient gemini) || gemini.isHealthy();
+    }
+
     // ── 키워드 스코어링 ──────────────────────────────────────────────────
     /** question 토큰 가산에서 제외할 흔한 불용어(변별력 없음 → 노이즈 유발). */
     private static final java.util.Set<String> STOPWORDS = java.util.Set.of(

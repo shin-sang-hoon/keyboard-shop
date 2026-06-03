@@ -33,6 +33,9 @@ public class GeminiChatbotClient implements ChatbotLlmClient {
     private final double temperature;
     private final int maxOutputTokens;
 
+    /** 마지막 Gemini 호출 성공 여부 — 프론트 온라인/오프라인 점 판정용. 초기 true(미호출=가용 가정). */
+    private volatile boolean lastCallOk = true;
+
     public GeminiChatbotClient(
             @Value("${chatbot.gemini.base-url:https://generativelanguage.googleapis.com}") String baseUrl,
             @Value("${chatbot.gemini.api-key:${GEMINI_API_KEY:}}") String apiKey,
@@ -82,11 +85,23 @@ public class GeminiChatbotClient implements ChatbotLlmClient {
                     .retrieve()
                     .body(JsonNode.class);
 
-            return extractText(resp);
+            String text = extractText(resp);
+            lastCallOk = (text != null);   // 호출+파싱 성공 여부 기록(health 점)
+            return text;
         } catch (Exception e) {
+            lastCallOk = false;
             log.warn("[Gemini] 호출 실패: {} → null 반환(폴백)", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * 챗봇 LLM 가용 상태 — 프론트 온라인/오프라인 점 판정.
+     * API 키가 설정돼 있고 마지막 호출이 실패하지 않았으면 true.
+     * (키 미설정 / 직전 호출 실패·타임아웃 → false → 프론트 빨간 점)
+     */
+    public boolean isHealthy() {
+        return apiKey != null && !apiKey.isBlank() && lastCallOk;
     }
 
     /** candidates[0].content.parts[*].text 를 이어붙여 반환. 없으면 null. */
