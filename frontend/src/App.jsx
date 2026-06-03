@@ -6,6 +6,10 @@
 //   - /admin/audit-logs : 감사 로그 뷰어 (ProtectedRoute + ADMIN role 가드)
 //   - CHROME_HIDDEN_PATHS '/admin' 추가 — 관리자 영역은 별도 chrome 정책 (Phase 7-A 에서 AdminApp shell 도입 예정)
 //
+//
+// 챗봇/3D FAB (2026-06-02) - Fab 컴포넌트 마운트. ConditionalChrome 으로 감싸 빌더/로그인/가입/auth/admin/비번찾기 화면에서는 숨김.
+//   - Fab 내부에 ChatbotWidget 포함 (🤖 AI 챗봇 + ⌨️ 3D 미리보기 → /products?view=3d).
+//
 // 그 외 라우트는 라운드 3-Q 그대로 유지.
 
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
@@ -46,6 +50,7 @@ import Header from './components/Header';
 import CartSyncEffect from './components/CartSyncEffect';
 import RecentlyViewedSidebar from './components/RecentlyViewedSidebar';
 import Footer from './components/Footer';
+import Fab from './components/Fab';
 import { useCartStore } from './stores/cartStore';
 
 // '/auth' 추가: 카카오 콜백 페이지는 잠깐 거치는 페이지라 헤더/푸터 노출 불필요.
@@ -177,6 +182,7 @@ function App() {
         />
       </Routes>
       <ConditionalChrome><Footer /></ConditionalChrome>
+      <ConditionalChrome><Fab /></ConditionalChrome>
     </BrowserRouter>
   );
 }
