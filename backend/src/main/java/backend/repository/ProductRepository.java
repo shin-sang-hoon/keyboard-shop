@@ -9,6 +9,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import java.util.List;
@@ -38,6 +39,24 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     @Override
     @EntityGraph(attributePaths = {"brand", "category"})
     Optional<Product> findById(Long id);
+
+    // ─── O-1 (6/5): 주문 생성 시 원자적 재고 차감 ──────────────────────
+    /**
+     * 재고를 원자적으로 차감한다 — 한 UPDATE 문이 "재고 충분?" 검사와 차감을 동시에 수행.
+     *
+     * WHERE p.stock >= :qty 덕분에, 동시 주문이 같은 마지막 재고를 노려도 DB 가
+     * 직렬화해 초과판매(oversell, lost update)를 원천 차단한다.
+     *
+     * @return 영향받은 행 수. 1 = 차감 성공, 0 = 재고 부족(또는 없는 id) → 호출부에서 409.
+     *
+     * 주의: @Modifying 벌크 UPDATE 는 영속성 컨텍스트를 우회한다. 호출 직후 메모리상의
+     *   Product.stock 은 차감 전(stale) 값이지만, 주문 생성 경로는 이후 stock 을 읽지
+     *   않으므로 무해하다. clearAutomatically 는 쓰지 않는다 — 같은 트랜잭션에서 계속
+     *   사용하는 cart/order 엔티티가 detach 되면 안 되기 때문.
+     */
+    @Modifying
+    @Query("UPDATE Product p SET p.stock = p.stock - :qty WHERE p.id = :id AND p.stock >= :qty")
+    int deductStock(@Param("id") Long id, @Param("qty") int qty);
 
     // ─── 5-G/Step 5: productType 필터링 ──────────────────────────────────
     @EntityGraph(attributePaths = {"brand", "category"})
