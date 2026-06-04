@@ -17,32 +17,100 @@
 //   - swagkey 라이트 톤 통일
 
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, Navigate } from 'react-router-dom';
+import { Link, useNavigate, Navigate, useSearchParams } from 'react-router-dom';
 import { useCartStore } from '../stores/cartStore';
 import { useAuth } from '../hooks/useAuth';
-import { createOrder } from '../api/order';
+import { createOrder, createOrderDirect } from '../api/order';
+import { apiClient } from '../api/client';
 import { colors, spacing, radius } from '../styles/tokens';
 
 export default function OrderPlaceholderPage() {
   const navigate = useNavigate();
   const { isAuthenticated, user } = useAuth();
+  const [searchParams] = useSearchParams();
 
-  const items = useCartStore((s) => s.getDisplayItems());
-  const totalQuantity = useCartStore((s) => s.getTotalQuantity());
-  const totalPrice = useCartStore((s) => s.getTotalPrice());
+  // ─── 주문 출처 판별 (다형 처리) ──────────────────────
+  //   ?type=direct → 즉시구매: URL 의 productId/qty/옵션으로 단건 주문 (장바구니 미경유).
+  //   그 외(기본)  → 장바구니 주문: cartStore 의 담긴 품목으로 주문.
+  //   두 경로가 같은 주문서 UI(OrderItemRow·결제 요약)를 공유하고, 데이터 소스와
+  //   결제 호출(createOrderDirect vs createOrder)만 분기한다.
+  const isDirect = searchParams.get('type') === 'direct';
+  const directProductId = searchParams.get('productId');
+  const directQty = Math.max(1, parseInt(searchParams.get('qty') || '1', 10) || 1);
+  const directOpts = {
+    layout: searchParams.get('layout') || null,
+    switchType: searchParams.get('switchType') || null,
+    keycapColor: searchParams.get('keycapColor') || null,
+    caseColor: searchParams.get('caseColor') || null,
+  };
+
+  // 장바구니 데이터 (cart 경로에서만 사용)
+  const cartItems = useCartStore((s) => s.getDisplayItems());
+  const cartTotalQuantity = useCartStore((s) => s.getTotalQuantity());
+  const cartTotalPrice = useCartStore((s) => s.getTotalPrice());
   const clearCart = useCartStore((s) => s.clear);
+
+  // 즉시구매 단건 상품 (direct 경로에서만 — productId 로 서버 재조회해 표시용 데이터 구성)
+  const [directItem, setDirectItem] = useState(null);
+  const [directLoading, setDirectLoading] = useState(isDirect);
+  const [directError, setDirectError] = useState(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState(null);
 
+  // 즉시구매: 상품 정보를 서버에서 조회 (가격/이름/이미지는 표시용 — 실제 금액은 결제 시 서버 재계산).
+  // 커스텀 옵션이 있으면 서버 가격표와 동일한 규칙으로 표시 단가를 보정한다.
+  useEffect(() => {
+    if (!isDirect || !directProductId) return;
+    let alive = true;
+    setDirectLoading(true);
+    setDirectError(null);
+    apiClient.get(`/products/${directProductId}`)
+      .then((res) => {
+        if (!alive) return;
+        const p = res.data;
+        const unitPrice = calcDisplayUnitPrice(p, directOpts);
+        setDirectItem({
+          productId: p.id,
+          productName: p.name,
+          brandName: p.brandName,
+          imageUrl: p.imageUrl,
+          price: unitPrice,
+          quantity: directQty,
+          subtotal: unitPrice * directQty,
+          layout: directOpts.layout,
+          switchType: directOpts.switchType,
+          keycapColor: directOpts.keycapColor,
+          caseColor: directOpts.caseColor,
+        });
+      })
+      .catch((err) => {
+        if (!alive) return;
+        console.error('direct product load error:', err);
+        setDirectError(err?.response?.data?.message || '상품 정보를 불러오지 못했습니다.');
+      })
+      .finally(() => { if (alive) setDirectLoading(false); });
+    return () => { alive = false; };
+  }, [isDirect, directProductId, directQty,
+      directOpts.layout, directOpts.switchType, directOpts.keycapColor, directOpts.caseColor]);
+
+  // ─── 표시 데이터 통합 (direct/cart 공통 렌더용) ──────
+  const items = isDirect ? (directItem ? [directItem] : []) : cartItems;
+  const totalQuantity = isDirect ? (directItem ? directItem.quantity : 0) : cartTotalQuantity;
+  const totalPrice = isDirect ? (directItem ? directItem.subtotal : 0) : cartTotalPrice;
+
   // ─── 가드: 비로그인이면 로그인으로 ────────────────────
   if (!isAuthenticated) {
-    return <Navigate to="/login?redirect=/order" replace />;
+    const redirect = isDirect
+      ? `/order?type=direct&productId=${directProductId}&qty=${directQty}`
+      : '/order';
+    return <Navigate to={`/login?redirect=${encodeURIComponent(redirect)}`} replace />;
   }
 
-  // ─── 가드: 카트 비어있으면 카트 페이지로 ────────────
-  // submitting 중이면 우회 — clearCart() 직후 unmount 방지 (Toast 표시 보장)
-  if ((!items || items.length === 0) && !submitting) {
+  // ─── 가드: 장바구니 경로에서 카트 비어있으면 카트로 ──
+  //   direct 경로는 cart 와 무관하므로 이 가드를 적용하지 않는다.
+  //   submitting 중이면 우회 — clearCart() 직후 unmount 방지 (Toast 표시 보장).
+  if (!isDirect && (!cartItems || cartItems.length === 0) && !submitting) {
     return <Navigate to="/cart" replace />;
   }
 
@@ -52,10 +120,10 @@ export default function OrderPlaceholderPage() {
   }
 
   // ─── 주문 완료 (실제 주문 생성 → 결제는 mock) ─────────
-  //   백엔드 POST /api/orders 는 바디 없이 호출 — 서버가 장바구니를 직접 읽어
-  //   주문을 만든다(품목/수량/가격의 단일 출처는 서버 cart_items). 성공해야만
-  //   Toast → clearCart → navigate. 주문 생성 실패(예: 재고 부족 409) 시
-  //   cart 를 비우지 않아 데이터 유실을 막는다.
+  //   direct  : createOrderDirect({productId, quantity, 옵션}) — 장바구니 미경유, clearCart 불필요.
+  //   cart    : createOrder() — 서버가 장바구니를 직접 읽어 주문, 성공 후 clearCart.
+  //   두 경우 모두 성공해야만 Toast → (cart 만 clearCart) → navigate. 실패(예: 재고 부족 409) 시
+  //   장바구니/화면을 보존해 데이터 유실과 중복 주문을 막는다.
   async function handleSubmitOrder() {
     if (submitting) return;
     if (!window.confirm(
@@ -65,28 +133,63 @@ export default function OrderPlaceholderPage() {
 
     setSubmitting(true);
     try {
-      // 1) 실제 주문 생성 (백엔드가 장바구니 로드 → orders + order_items 저장 + 재고 차감)
-      const order = await createOrder();
+      // 1) 실제 주문 생성 (서버가 재고 차감 + orders/order_items 저장, 가격은 서버 재계산)
+      const order = isDirect
+        ? await createOrderDirect({
+            productId: directItem.productId,
+            quantity: directItem.quantity,
+            layout: directItem.layout,
+            switchType: directItem.switchType,
+            keycapColor: directItem.keycapColor,
+            caseColor: directItem.caseColor,
+          })
+        : await createOrder();
 
       // 2) 주문 생성 성공 → Toast 먼저 (화면을 마지막까지 정상 상태로 유지)
       showToast(`주문이 완료되었습니다 (주문번호 ${order?.id ?? '-'})`);
 
-      // 3) 2.5초 후 clearCart + navigate (Toast 충분히 표시 후)
+      // 3) 2.5초 후 정리 + 이동 (Toast 충분히 표시 후).
+      //    direct 는 장바구니를 건드리지 않으므로 clearCart 를 건너뛴다.
       setTimeout(async () => {
-        try {
-          await clearCart();
-        } catch (e) {
-          console.warn('clearCart after order:', e);
+        if (!isDirect) {
+          try {
+            await clearCart();
+          } catch (e) {
+            console.warn('clearCart after order:', e);
+          }
         }
-        navigate('/', { replace: true });
+        navigate('/mypage', { replace: true });
       }, 2500);
     } catch (err) {
-      // 주문 생성 실패 — cart 는 그대로 보존, 재시도 가능
+      // 주문 생성 실패 — 장바구니/화면 그대로 보존, 재시도 가능
       console.error('createOrder error:', err);
       const msg = err?.response?.data?.message || '주문 처리에 실패했습니다. 다시 시도해주세요.';
       showToast(msg);
       setSubmitting(false);
     }
+  }
+
+  // ─── 즉시구매 로딩/에러 가드 ─────────────────────────
+  if (isDirect && directLoading) {
+    return (
+      <div style={S.page}>
+        <div style={{ ...S.container, textAlign: 'center', paddingTop: 80 }}>
+          <p style={{ color: colors.textOnLight }}>상품 정보를 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
+  if (isDirect && (directError || !directItem)) {
+    return (
+      <div style={S.page}>
+        <div style={{ ...S.container, textAlign: 'center', paddingTop: 80 }}>
+          <p style={{ color: colors.textOnLight, marginBottom: spacing.md }}>
+            {directError || '주문할 상품을 찾을 수 없습니다.'}
+          </p>
+          <Link to="/products" style={S.backLink}>← 쇼핑 계속하기</Link>
+        </div>
+      </div>
+    );
   }
 
   // ─── 렌더 ────────────────────────────────────────────
@@ -97,12 +200,16 @@ export default function OrderPlaceholderPage() {
         <div style={S.crumb}>
           <Link to="/" style={S.crumbLink}>홈</Link>
           <span style={S.crumbSep}>›</span>
-          <Link to="/cart" style={S.crumbLink}>장바구니</Link>
+          {isDirect ? (
+            <Link to={`/products/${directProductId}`} style={S.crumbLink}>상품</Link>
+          ) : (
+            <Link to="/cart" style={S.crumbLink}>장바구니</Link>
+          )}
           <span style={S.crumbSep}>›</span>
           <span style={S.crumbCurr}>주문/결제</span>
         </div>
 
-        <h1 style={S.title}>주문/결제</h1>
+        <h1 style={S.title}>{isDirect ? '바로 구매' : '주문/결제'}</h1>
 
         {/* mock 안내 배너 */}
         <div style={S.mockBanner}>
@@ -188,7 +295,11 @@ export default function OrderPlaceholderPage() {
                 {submitting ? '처리 중...' : `결제하기 (mock)`}
               </button>
 
-              <Link to="/cart" style={S.backLink}>← 장바구니로 돌아가기</Link>
+              {isDirect ? (
+                <Link to={`/products/${directProductId}`} style={S.backLink}>← 상품으로 돌아가기</Link>
+              ) : (
+                <Link to="/cart" style={S.backLink}>← 장바구니로 돌아가기</Link>
+              )}
             </div>
           </aside>
         </div>
@@ -214,6 +325,25 @@ const CASE_LABEL = {
   original: '오리지널 케이스', white: '화이트 케이스', silver: '실버 케이스',
   black: '블랙 케이스', beige: '베이지 케이스',
 };
+
+// 즉시구매 표시 단가 계산 (서버 BuilderPriceCalculator 와 동일 규칙).
+//   주의: 이 값은 화면 표시용일 뿐, 실제 결제 금액은 서버가 결제 시점에 다시 계산한다
+//   (위변조 차단의 단일 진실은 서버). 옵션이 없으면 product.price 를 그대로 쓴다.
+//   가격표가 서버와 어긋나면 표시값만 잠깐 다를 뿐 결제는 서버 값으로 처리된다.
+const DISPLAY_SWITCH_PRICE = { LINEAR: 25000, TACTILE: 28000, CLICKY: 30000 };
+const DISPLAY_KEYCAP_PRICE = {
+  original: 0, white: 35000, black: 35000, gray: 38000, navy: 38000, red: 42000, mint: 42000,
+};
+function calcDisplayUnitPrice(product, opts) {
+  const hasOption = opts.layout || opts.switchType || opts.keycapColor;
+  if (!hasOption) {
+    return product.price != null ? product.price : 0;
+  }
+  const base = product.price != null ? product.price : 0;
+  const sw = opts.switchType ? (DISPLAY_SWITCH_PRICE[opts.switchType] || 0) : 0;
+  const kc = opts.keycapColor ? (DISPLAY_KEYCAP_PRICE[opts.keycapColor] || 0) : 0;
+  return base + sw + kc;
+}
 
 function buildOptionLabels(item) {
   const labels = [];
@@ -274,7 +404,10 @@ const S = {
   container: {
     maxWidth: 1200,
     margin: '0 auto',
-    padding: '0 24px',
+    paddingTop: 0,
+    paddingRight: 24,
+    paddingBottom: 0,
+    paddingLeft: 24,
   },
 
   // Breadcrumb

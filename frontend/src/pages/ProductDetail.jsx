@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { addRecentlyViewed } from '../utils/recentlyViewed';
 import { is3DReady } from '../utils/builder3d';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import ProductGallery from '../components/ProductGallery';
 import ProductTabs from '../components/ProductTabs';
 import QnAFormModal from '../components/QnAFormModal';
@@ -171,6 +171,7 @@ function HotdealCountdown({ endAt }) {
 // ─── 메인 ProductDetail ──────────────────────────────────────────
 export default function ProductDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
 
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -348,12 +349,24 @@ export default function ProductDetail() {
 
   const addToCart = useCartStore((s) => s.addItem);
 
+  // 구매하기(즉시구매) — 장바구니를 거치지 않고 주문서(/order)로 직행.
+  //   주문서 페이지가 ?type=direct 와 productId/qty 를 읽어 단건 주문을 처리한다
+  //   (장바구니 결제와 동일 페이지 재사용, 데이터 소스만 분기). 일반 상품은 수량 1·옵션 없음.
+  //   실제 주문 생성/결제는 주문서에서 진행하므로 여기서는 가드만 보고 이동한다.
   function handleBuy() {
     if (isSoldOut) {
       showToast('품절된 상품입니다');
       return;
     }
-    showToast('구매 페이지 준비 중입니다');
+    if (activeAuction) {
+      showToast('핫딜 상품은 입찰하러 가기를 이용해주세요');
+      return;
+    }
+    if (!isLoggedIn()) {
+      navigate(`/login?redirect=${encodeURIComponent(`/order?type=direct&productId=${id}&qty=1`)}`);
+      return;
+    }
+    navigate(`/order?type=direct&productId=${id}&qty=1`);
   }
 
   async function handleAddToCart() {

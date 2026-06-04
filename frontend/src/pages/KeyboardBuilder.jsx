@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { is3DReady } from "../utils/builder3d";
 import { useCartStore } from "../stores/cartStore";
+import { useAuthStore } from "../stores/authStore";
 
 // ── API ───────────────────────────────────────────────────────────────────────
 const API_BASE = "http://localhost:8080/api";
@@ -795,10 +796,27 @@ export default function KeyboardBuilder({
     }
   };
 
-  // 구매하기: ProductDetail 의 handleBuy 와 동일 동작
-  // (구매 플로우 구현 시 함께 실제 결제로 연동)
+  // 구매하기(즉시구매) — 장바구니를 거치지 않고 주문서(/order)로 직행.
+  //   장바구니 담기(handleAddToCart)와 동일한 옵션(layout/sw/keycap.id/caseColor.id)을
+  //   쿼리 파라미터로 실어 보낸다. 주문서가 ?type=direct 로 단건 주문을 처리하며,
+  //   금액은 서버가 옵션ID로 재계산한다(위변조 차단). 실제 결제는 주문서에서 진행한다.
   const handleBuy = () => {
-    showToast("구매 페이지 준비 중입니다");
+    if (!productId) { showToast("상품 정보를 불러오는 중입니다"); return; }
+    const params = new URLSearchParams({
+      type: "direct",
+      productId: String(productId),
+      qty: "1",
+      layout,
+      switchType: sw,
+      keycapColor: keycap.id,
+      caseColor: caseColor.id,
+    });
+    const target = `/order?${params.toString()}`;
+    if (!useAuthStore.getState().accessToken) {
+      navigate(`/login?redirect=${encodeURIComponent(target)}`);
+      return;
+    }
+    navigate(target);
   };
 
   const handleLayoutClick = (l) => {
