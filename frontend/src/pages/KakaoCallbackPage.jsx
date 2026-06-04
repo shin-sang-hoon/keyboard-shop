@@ -36,6 +36,19 @@ import { useAuth } from '../hooks/useAuth';
 import { colors, typography, spacing, radius } from '../styles/tokens';
 
 const KAKAO_STATE_KEY = 'kakao_oauth_state';
+const KAKAO_REDIRECT_KEY = 'kakao_redirect';
+
+// 카카오 로그인 후 복귀 경로를 꺼낸다. LoginPage 가 sessionStorage 에 저장한 값을 읽고,
+// 한 번 쓰면 즉시 제거한다(찌꺼기 방지). 오픈 리다이렉트 방어: 내부 절대경로("/"로 시작,
+// "//" 아님)만 허용하고 그 외에는 '/'로 폴백 — LoginPage 의 이메일 로그인 복귀와 동일 정책.
+function popKakaoRedirect() {
+  const raw = sessionStorage.getItem(KAKAO_REDIRECT_KEY);
+  sessionStorage.removeItem(KAKAO_REDIRECT_KEY);
+  if (typeof raw === 'string' && raw.startsWith('/') && !raw.startsWith('//')) {
+    return raw;
+  }
+  return '/';
+}
 
 export default function KakaoCallbackPage() {
   const navigate = useNavigate();
@@ -62,6 +75,7 @@ export default function KakaoCallbackPage() {
     if (errorCode) {
       const desc = sp.get('error_description');
       sessionStorage.removeItem(KAKAO_STATE_KEY);
+      sessionStorage.removeItem(KAKAO_REDIRECT_KEY); // 로그인 실패 시 보관된 복귀경로 폐기
       setStatus('error');
       setErrorMessage(translateError(errorCode, desc));
       return;
@@ -78,6 +92,7 @@ export default function KakaoCallbackPage() {
     const stateFromUrl = sp.get('state');
 
     if (!accessToken || !email) {
+      sessionStorage.removeItem(KAKAO_REDIRECT_KEY); // 로그인 실패 시 보관된 복귀경로 폐기
       setStatus('error');
       setErrorMessage('인증 정보가 누락되었어요. 다시 로그인해 주세요.');
       return;
@@ -90,6 +105,7 @@ export default function KakaoCallbackPage() {
     sessionStorage.removeItem(KAKAO_STATE_KEY); // 한 번만 쓰는 nonce, 즉시 정리
 
     if (!stateFromStorage || stateFromStorage !== stateFromUrl) {
+      sessionStorage.removeItem(KAKAO_REDIRECT_KEY); // 로그인 실패 시 보관된 복귀경로 폐기
       setStatus('error');
       setErrorMessage(
         '보안 검증에 실패했어요. 다시 로그인해 주세요. (CSRF 의심)'
@@ -107,11 +123,14 @@ export default function KakaoCallbackPage() {
 
     setStatus('success');
 
+    // 로그인 전 머물던 곳(구매하기 등)으로 복귀. 보관된 redirect 가 없으면 '/'.
+    const redirectTo = popKakaoRedirect();
+
     // setTimeout cleanup 의도적으로 등록 안 함 -
     // navigate 후 unmount 되면 setTimeout 콜백은 실행되지 않거나(이미 실행 후) 무해.
     // cleanup 등록하면 deps 변경 시 실행 전 취소되어 navigate 가 호출 안 됨.
     setTimeout(() => {
-      navigate('/', { replace: true });
+      navigate(redirectTo, { replace: true });
     }, 800);
 
     // 마운트 시 한 번만 실행. params/setSession/navigate 는 이 effect 안에서만 사용.

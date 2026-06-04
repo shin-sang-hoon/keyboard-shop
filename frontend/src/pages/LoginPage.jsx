@@ -16,15 +16,20 @@
 //     프론트가 알 필요 없게. multi-provider 확장도 같은 패턴 재활용.
 
 import { useState } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { colors, typography, spacing, radius } from '../styles/tokens';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
 const KAKAO_STATE_KEY = 'kakao_oauth_state';
+// 카카오 로그인은 페이지를 이탈했다 KakaoCallbackPage 로 돌아오므로, 로그인 후 복귀할
+// 경로(redirect)를 잠시 sessionStorage 에 보관한다. state(CSRF nonce)와 키를 분리해
+// 두 관심사(보안 검증 / 복귀 경로)를 섞지 않는다.
+const KAKAO_REDIRECT_KEY = 'kakao_redirect';
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const location = useLocation();
   const { login } = useAuth();
 
@@ -34,7 +39,19 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [kakaoLoading, setKakaoLoading] = useState(false);
 
-  const redirectTo = location.state?.from?.pathname || '/';
+  // 로그인 성공 후 돌아갈 곳. 두 경로 모두 지원:
+  //   1) ?redirect= 쿼리 (구매하기/장바구니 주문 등 ProtectedRoute 진입점이 보냄)
+  //   2) location.state.from.pathname (state 방식으로 넘어온 경우)
+  // 오픈 리다이렉트 방어: 외부 URL(//evil.com, http://...)을 막기 위해 내부 절대경로
+  //   ("/"로 시작하고 "//"로 시작하지 않음)만 허용한다. 그 외에는 "/" 로 폴백.
+  function resolveSafeRedirect() {
+    const raw = searchParams.get('redirect') || location.state?.from?.pathname || '/';
+    if (typeof raw === 'string' && raw.startsWith('/') && !raw.startsWith('//')) {
+      return raw;
+    }
+    return '/';
+  }
+  const redirectTo = resolveSafeRedirect();
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -91,6 +108,15 @@ export default function LoginPage() {
     try {
       const state = crypto.randomUUID();
       sessionStorage.setItem(KAKAO_STATE_KEY, state);
+
+      // 로그인 후 복귀 경로 보관 (콜백에서 읽어 navigate). redirectTo 는 컴포넌트 상단에서
+      // 이미 오픈 리다이렉트 방어를 거친 안전한 내부 경로다. 기본값 '/'는 콜백 폴백과
+      // 동일하므로 저장하지 않아 불필요한 찌꺼기를 남기지 않는다.
+      if (redirectTo && redirectTo !== '/') {
+        sessionStorage.setItem(KAKAO_REDIRECT_KEY, redirectTo);
+      } else {
+        sessionStorage.removeItem(KAKAO_REDIRECT_KEY);
+      }
 
       const res = await fetch(
         `${API_BASE}/auth/kakao/authorize-url?state=${encodeURIComponent(state)}`
