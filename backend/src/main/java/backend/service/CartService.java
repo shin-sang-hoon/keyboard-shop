@@ -47,6 +47,7 @@ public class CartService {
     private final ProductRepository productRepository;
     private final AuctionRepository auctionRepository;
     private final BuilderPriceCalculator priceCalculator;
+    private final PurchaseGuard purchaseGuard;
 
     // ─── 조회 ────────────────────────────────────────────
 
@@ -95,17 +96,8 @@ public class CartService {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> BusinessException.notFound("Product not found: " + productId));
 
-        // 가드 1: INACTIVE 상품 거부
-        if (product.getStatus() != null && !"ACTIVE".equals(product.getStatus().name())) {
-            throw BusinessException.badRequest("This product is not available");
-        }
-
-        // 가드 2: 핫딜(ACTIVE Auction) 진행 중인 상품 거부
-        auctionRepository.findByProductIdAndStatus(productId, Auction.Status.ACTIVE)
-                .ifPresent(a -> {
-                    throw BusinessException.badRequest(
-                            "This product is currently in auction. Please bid instead.");
-                });
+        // 구매 가능 여부 가드 (INACTIVE 거부 + 핫딜 경매 거부) — 즉시구매 주문과 동일 컴포넌트 공유.
+        purchaseGuard.validatePurchasable(product);
 
         // 서버측 단가 재계산 (위변조 방어) — 클라가 보낸 가격은 신뢰하지 않음
         Integer unitPrice = priceCalculator.calcUnitPrice(product, layout, switchType, keycapColor);

@@ -22,11 +22,19 @@ public class OrderController {
     private final OrderService orderService;
 
     @PostMapping
-    @Operation(summary = "주문 생성")
+    @Operation(summary = "주문 생성 — 장바구니 기반 (Cart→Order: 서버 장바구니 기반, status=PAID mock)")
     public ResponseEntity<OrderDto.Response> createOrder(
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ResponseEntity.ok(orderService.createOrderFromCart(userDetails.getUsername()));
+    }
+
+    @PostMapping("/direct")
+    @Operation(summary = "주문 생성 — 즉시구매 (상품상세 '구매하기'·3D 빌더 '바로구매', 장바구니 미경유, status=PAID mock)")
+    public ResponseEntity<OrderDto.Response> createOrderDirect(
             @AuthenticationPrincipal UserDetails userDetails,
-            @RequestBody OrderDto.Request request) {
-        return ResponseEntity.ok(orderService.createOrder(userDetails.getUsername(), request));
+            @RequestBody OrderDto.DirectRequest request) {
+        return ResponseEntity.ok(
+                orderService.createOrderDirect(userDetails.getUsername(), request));
     }
 
     @GetMapping("/my")
