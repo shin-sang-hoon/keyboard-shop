@@ -52,9 +52,10 @@ export default function OrderPlaceholderPage() {
   }
 
   // ─── 주문 완료 (실제 주문 생성 → 결제는 mock) ─────────
-  //   순서가 중요: createOrder 로 DB에 Order 를 먼저 만든 뒤(성공해야만)
-  //   Toast → clearCart → navigate. 주문 생성 실패 시 cart 를 비우지 않아 데이터 유실 방지.
-  //   items 는 clearCart 전에 캡처 (비우면 사라지므로).
+  //   백엔드 POST /api/orders 는 바디 없이 호출 — 서버가 장바구니를 직접 읽어
+  //   주문을 만든다(품목/수량/가격의 단일 출처는 서버 cart_items). 성공해야만
+  //   Toast → clearCart → navigate. 주문 생성 실패(예: 재고 부족 409) 시
+  //   cart 를 비우지 않아 데이터 유실을 막는다.
   async function handleSubmitOrder() {
     if (submitting) return;
     if (!window.confirm(
@@ -62,29 +63,10 @@ export default function OrderPlaceholderPage() {
       `(결제 자체는 mock 동작 - 실제 PG 연동은 Phase 8 배포 단계에서 도입 예정)`
     )) return;
 
-    // clearCart 전에 주문 품목 스냅샷 캡처 (커스텀 빌드는 옵션도 함께)
-    const orderItems = (items || []).map((it) => ({
-      productId: it.productId,
-      quantity: it.quantity ?? 1,
-      ...(it.layout || it.switchType || it.keycapColor || it.caseColor
-        ? {
-            layout: it.layout ?? null,
-            switchType: it.switchType ?? null,
-            keycapColor: it.keycapColor ?? null,
-            caseColor: it.caseColor ?? null,
-          }
-        : {}),
-    }));
-
-    if (orderItems.length === 0) {
-      showToast('주문할 상품이 없습니다');
-      return;
-    }
-
     setSubmitting(true);
     try {
-      // 1) 실제 주문 생성 (백엔드 POST /api/orders → orders + order_items 저장)
-      const order = await createOrder(orderItems);
+      // 1) 실제 주문 생성 (백엔드가 장바구니 로드 → orders + order_items 저장 + 재고 차감)
+      const order = await createOrder();
 
       // 2) 주문 생성 성공 → Toast 먼저 (화면을 마지막까지 정상 상태로 유지)
       showToast(`주문이 완료되었습니다 (주문번호 ${order?.id ?? '-'})`);

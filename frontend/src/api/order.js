@@ -3,10 +3,10 @@
 //
 // 백엔드 endpoint:
 //   GET  /api/orders/my  - 내 주문 목록 (List<OrderDto.Response>)
-//   POST /api/orders     - 주문 생성 (Cart→Order, OrderDto.Request → OrderDto.Response)
+//   POST /api/orders     - 주문 생성 (Cart→Order). 바디 없음 — 서버가 인증 사용자의
+//                          장바구니를 직접 읽어 주문 생성 (→ OrderDto.Response).
 //
 // OrderDto.Response: { id, totalPrice, status, items: [{productId, productName, price, quantity}], createdAt }
-// OrderDto.Request:  { items: [{ productId, quantity }] }
 // 페이징 없이 단순 List (마이페이지는 전량 노출).
 //
 // 모든 호출은 apiClient (axios 인터셉터) — JWT 자동 첨부 + 401 refresh.
@@ -23,30 +23,19 @@ export async function getMyOrders() {
 }
 
 /**
- * 주문 생성 (Cart→Order). 백엔드가 상품 단가로 가격 스냅샷을 다시 계산하므로
- * 프론트는 productId / quantity 만 전달한다 (가격 위변조 방지).
+ * 주문 생성 (Cart→Order).
  *
- * cartStore.getDisplayItems() 가 주는 item 은 로그인/비로그인 모두 productId 를 가짐.
+ * 백엔드 OrderService.createOrder(email) 는 요청 바디를 받지 않고 서버에서
+ * 인증 사용자의 장바구니를 직접 로드해 주문을 만든다. 품목 / 수량 / 가격 모두
+ * 서버 장바구니(cart_items)가 단일 출처이며, 가격은 상품 단가로 재계산되어
+ * 클라이언트 위변조가 불가능하다. 따라서 프론트는 바디 없이 호출만 한다.
  *
- * @param {Array<{productId: number|string, quantity: number}>} items 주문 품목
+ * 재고 부족 시 백엔드가 409 CONFLICT (message: "재고가 부족합니다: {상품명}") 를 반환하며,
+ * 이때 주문은 생성되지 않고 재고 차감도 롤백된다 (all-or-nothing).
+ *
  * @returns {Promise<Object>} OrderDto.Response (id / totalPrice / status / items / createdAt)
  */
-export async function createOrder(items) {
-  const payload = {
-    items: items.map((it) => ({
-      productId: it.productId,
-      quantity: it.quantity ?? 1,
-      // 3D 빌더 커스텀 옵션 (일반 상품은 undefined → 전송 생략). 서버가 단가 재계산.
-      ...(it.layout || it.switchType || it.keycapColor || it.caseColor
-        ? {
-            layout: it.layout ?? null,
-            switchType: it.switchType ?? null,
-            keycapColor: it.keycapColor ?? null,
-            caseColor: it.caseColor ?? null,
-          }
-        : {}),
-    })),
-  };
-  const res = await apiClient.post('/orders', payload);
+export async function createOrder() {
+  const res = await apiClient.post('/orders');
   return res.data;
 }
