@@ -176,8 +176,11 @@ public class OrderService {
         int totalPrice = items.stream().mapToInt(OrderItem::getPrice).sum();
 
         // 결제 고유번호 발급 — 가맹점이 생성하는 값. 주문과 1:1.
-        // 형식: "swachron-{UUID}". 추측 불가하고 충돌 없음. (payment_id unique 제약과 함께 안전.)
-        String paymentId = "swachron-" + java.util.UUID.randomUUID();
+        // ★ PG사(이니시스 INIStdPay)는 주문번호(oid)를 최대 40자까지만 허용한다.
+        //   기존 "swachron-"(9) + UUID(하이픈 포함 36) = 45자는 초과 → 결제창에서 거부됨.
+        //   접두사를 "swc"(3)로 줄이고 UUID 하이픈을 제거(36→32)해 총 35자로 맞춘다.
+        //   UUID 엔트로피는 그대로라 충돌 방지·추측 불가 특성은 유지된다.
+        String paymentId = "swc" + java.util.UUID.randomUUID().toString().replace("-", "");
 
         Order.OrderBuilder builder = Order.builder()
                 .user(user)
