@@ -125,21 +125,154 @@ public class OrderService {
         return toResponse(saved);
     }
 
+    // =====================================================================
+    // PortOne 결제 (6/5) — prepare/complete 2단계
+    //
+    //  기존 placeOrder(= 재고차감 + PAID 한 방)를 두 단계로 분해한 것:
+    //   ┌ createPendingOrder : 가격 스냅샷 + Order(PENDING) 저장 + paymentId 발급. 재고 안 건드림.
+    //   └ confirmPayment      : (PaymentService 가 PortOne 단건조회로 금액검증을 끝낸 뒤 호출)
+    //                           재고 차감 + PENDING→PAID 전환.
+    //  PaymentService 가 cart/direct 입력을 OrderLine 으로 변환해 createPendingOrder 를 호출하고,
+    //  결제창 결제 후 PortOne 검증을 통과하면 confirmPayment 를 호출한다.
+    //  주문 무결성(재고 원자 차감·가격 스냅샷)은 여전히 이 서비스 한 곳에 집중된다.
+    // =====================================================================
+
     /**
-     * 주문 생성 공통 코어 (단일 진실 원천).
+     * 결제 1단계 — PENDING 주문 생성 (재고 미차감).
      *
-     * 장바구니 주문(createOrderFromCart)과 즉시구매(createOrderDirect)가 공유하는 핵심.
-     * 주문 무결성 규칙 — 원자적 재고 차감, 재고 부족 409, 가격 스냅샷, 주문/주문항목 생성 —
-     * 이 단 한 곳에만 존재하므로 두 진입점의 동작이 절대 어긋날 수 없다.
+     * 가격 스냅샷(OrderItem)을 만들고 Order 를 status=PENDING 으로 저장하며 paymentId 를 발급한다.
+     * 재고는 여기서 건드리지 않는다 — 실제 결제가 PortOne 에서 완료되고 confirmPayment 의 검증을
+     * 통과한 뒤에만 차감한다(결제 안 한 주문이 재고를 잠그는 사고 방지).
+     *
+     * @param user     주문자 (이미 조회된 엔티티)
+     * @param lines    주문 라인 (장바구니/단건 어느 쪽에서 만들어졌든 동일)
+     * @param shipping 배송지 정보 (null 가능 — 추후 검증은 호출부 정책)
+     * @return 저장된 PENDING Order (paymentId 발급 완료, items 연결됨)
+     */
+    @Transactional
+    public Order createPendingOrder(User user, List<OrderLine> lines, OrderDto.ShippingInfo shipping) {
+        List<OrderItem> items = new ArrayList<>();
+        for (OrderLine line : lines) {
+            Product product = line.product();
+            int qty = line.quantity();
+
+            // 가격 스냅샷 — 재고 차감은 하지 않는다(결제 완료 후 confirmPayment 에서).
+            Integer unitPrice = line.unitPrice();
+            int effectiveUnit = (unitPrice != null) ? unitPrice
+                    : (product.getPrice() != null ? product.getPrice() : 0);
+
+            items.add(OrderItem.builder()
+                    .product(product)
+                    .quantity(qty)
+                    .price(effectiveUnit * qty)
+                    .unitPrice(unitPrice)
+                    .layout(line.layout())
+                    .switchType(line.switchType())
+                    .keycapColor(line.keycapColor())
+                    .caseColor(line.caseColor())
+                    .build());
+        }
+
+        int totalPrice = items.stream().mapToInt(OrderItem::getPrice).sum();
+
+        // 결제 고유번호 발급 — 가맹점이 생성하는 값. 주문과 1:1.
+        // 형식: "swachron-{UUID}". 추측 불가하고 충돌 없음. (payment_id unique 제약과 함께 안전.)
+        String paymentId = "swachron-" + java.util.UUID.randomUUID();
+
+        Order.OrderBuilder builder = Order.builder()
+                .user(user)
+                .totalPrice(totalPrice)
+                .status(Order.OrderStatus.PENDING)   // ★ 결제 전 = PENDING (재고 미차감)
+                .paymentId(paymentId);
+
+        if (shipping != null) {
+            builder.receiverName(shipping.getReceiverName())
+                   .receiverPhone(shipping.getReceiverPhone())
+                   .postcode(shipping.getPostcode())
+                   .address(shipping.getAddress())
+                   .addressDetail(shipping.getAddressDetail());
+        }
+
+        Order order = builder.build();
+        items.forEach(item -> item.setOrder(order));
+        order.setItems(items);
+        return orderRepository.save(order);
+    }
+
+    /**
+     * 결제 2단계 — 결제 확정 (재고 차감 + PENDING→PAID).
+     *
+     * PaymentService 가 PortOne 단건조회로 "실제 결제됨 + 금액 일치"를 검증한 뒤 호출한다.
+     * 이 메서드는 그 검증을 신뢰하고 주문을 확정한다:
+     *   1) 라인별 원자적 재고 차감 (deductStock — 부족 시 409, 결제는 됐는데 재고가 없는 경우)
+     *   2) status PENDING→PAID, payMethod 기록
+     * 멱등성: 이미 PAID 면 아무 것도 하지 않고 그대로 반환(complete 중복 호출 안전).
+     *
+     * @param order     확정할 PENDING 주문 (paymentId 로 조회된 엔티티)
+     * @param payMethod PortOne 응답의 결제수단 (표시용, null 가능)
+     * @return 확정된(PAID) Order
+     */
+    @Transactional
+    public Order confirmPayment(Order order, String payMethod) {
+        // 멱등 처리 — 이미 확정된 주문이면 재차감/재전환하지 않는다.
+        if (order.getStatus() == Order.OrderStatus.PAID) {
+            return order;
+        }
+        if (order.getStatus() != Order.OrderStatus.PENDING) {
+            throw BusinessException.conflict("결제를 확정할 수 없는 주문 상태입니다.");
+        }
+
+        // 재고 차감 — 결제가 실제로 완료된 시점에 비로소 차감(원자적 UPDATE, 부족 시 409).
+        for (OrderItem item : order.getItems()) {
+            int affected = productRepository.deductStock(item.getProduct().getId(), item.getQuantity());
+            if (affected == 0) {
+                throw BusinessException.conflict("재고가 부족합니다: " + item.getProduct().getName());
+            }
+        }
+
+        order.setStatus(Order.OrderStatus.PAID);
+        if (payMethod != null) {
+            order.setPayMethod(payMethod);
+        }
+        return order; // 영속 상태 — 트랜잭션 커밋 시 flush (명시 save 불필요하나 무해)
+    }
+
+    /**
+     * 결제 검증 실패 시 주문 취소 — 독립 트랜잭션(REQUIRES_NEW).
+     *
+     * PaymentService.complete 가 검증 실패로 예외를 던지기 직전에 호출한다. 호출부의 바깥
+     * 트랜잭션은 그 예외로 롤백되므로, 만약 같은 트랜잭션에서 status 를 CANCELLED 로 바꾸면
+     * 그 변경도 함께 롤백되어 주문이 PENDING 으로 남는다(추적 불가). 이를 막기 위해
+     * REQUIRES_NEW 로 별도 트랜잭션을 열어 CANCELLED 를 독립적으로 커밋한다 — 바깥이 롤백돼도
+     * 취소 기록은 보존된다.
+     *
+     * paymentId 로 주문을 다시 조회하는 이유: 바깥 트랜잭션의 영속 엔티티를 그대로 넘겨받아
+     * 수정하면 같은 영속성 컨텍스트라 REQUIRES_NEW 의 격리가 깨질 수 있다. 새 트랜잭션에서
+     * 독립적으로 조회→수정→커밋하여 확실히 분리한다. (PENDING 일 때만 취소 — 멱등.)
+     *
+     * @param paymentId 취소할 주문의 결제 식별자
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public void cancelOrderByPaymentId(String paymentId) {
+        orderRepository.findByPaymentIdWithItems(paymentId).ifPresent(order -> {
+            if (order.getStatus() == Order.OrderStatus.PENDING) {
+                order.setStatus(Order.OrderStatus.CANCELLED);
+            }
+        });
+    }
+
+    /**
+     * 주문 생성 공통 코어 (단일 진실 원천) — [레거시/mock 경로].
+     *
+     * ⚠️ PortOne 연동(6/5) 이후 정식 결제 경로는 createPendingOrder + confirmPayment 다.
+     * 이 메서드는 결제 없이 즉시 PAID 로 만드는 mock 경로로, createOrderFromCart/createOrderDirect
+     * 가 아직 호출한다(하위 호환). PortOne 흐름이 프론트까지 완성되면 호출이 끊긴다.
      *
      * 한 트랜잭션 안에서:
      *   1) 라인별 원자적 재고 차감 (deductStock — UPDATE ... WHERE stock >= qty, 부족 시 409)
      *   2) 가격 스냅샷 — 라인의 unitPrice(서버 계산값) 사용, null 이면 product.price
      *   3) Order 저장 (status=PAID, mock 결제) + OrderItem 연결
      * → 전부 성공 or 전부 롤백 (All-or-Nothing). 재고 차감 후 실패 시 차감도 롤백된다.
-     *
-     * 향후 PortOne 연동 시: prepare 단계는 status=PENDING 으로 주문만 만들고, 결제 영수증
-     * 검증(complete)을 통과한 뒤 이 코어의 재고 차감 + PAID 전환을 호출하는 형태로 확장한다.
      *
      * @param user  주문자 (이미 조회된 엔티티)
      * @param lines 주문 라인 목록 (장바구니/단건 어느 쪽에서 만들어졌든 동일하게 처리)
@@ -192,10 +325,13 @@ public class OrderService {
      * 주문 생성 코어가 받는 중립 주문 라인.
      *
      * 장바구니(CartItem)에서도, 즉시구매(단건 상품+옵션)에서도 만들 수 있는 공통 입력 타입.
-     * 진입점이 자신만의 방식으로 이 라인을 만들어 placeOrder 에 넘기면, 코어는 출처를
-     * 알 필요 없이 동일하게 처리한다. unitPrice 는 서버에서 계산된 값(또는 일반 상품이면 null).
+     * 진입점이 자신만의 방식으로 이 라인을 만들어 placeOrder/createPendingOrder 에 넘기면, 코어는
+     * 출처를 알 필요 없이 동일하게 처리한다. unitPrice 는 서버 계산값(또는 일반 상품이면 null).
+     *
+     * PaymentService(결제 prepare)도 이 타입으로 라인을 만들어 createPendingOrder 를 호출하므로
+     * public 으로 노출한다. 외부에서 직접 생성하지 않고 of() 정적 팩토리를 쓰도록 권장.
      */
-    private record OrderLine(
+    public record OrderLine(
             Product product,
             int quantity,
             Integer unitPrice,
@@ -203,6 +339,13 @@ public class OrderService {
             String switchType,
             String keycapColor,
             String caseColor) {
+
+        /** 단건(상품+옵션+서버계산 단가)으로 주문 라인 생성. */
+        public static OrderLine of(Product product, int quantity, Integer unitPrice,
+                                   String layout, String switchType,
+                                   String keycapColor, String caseColor) {
+            return new OrderLine(product, quantity, unitPrice, layout, switchType, keycapColor, caseColor);
+        }
     }
 
     public List<OrderDto.Response> getMyOrders(String email) {
@@ -243,7 +386,10 @@ public class OrderService {
                 .collect(Collectors.toList());
     }
 
-    private OrderDto.Response toResponse(Order order) {
+    /**
+     * Order → 응답 DTO 변환. PaymentService(complete 응답)도 재사용하므로 public.
+     */
+    public OrderDto.Response toResponse(Order order) {
         List<OrderDto.OrderItemResponse> itemResponses = order.getItems().stream()
                 .map(item -> OrderDto.OrderItemResponse.builder()
                         .productId(item.getProduct().getId())

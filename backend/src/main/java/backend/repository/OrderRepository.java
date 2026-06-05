@@ -51,4 +51,18 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
      * 상태별 주문 수 — 향후 통계용 (현재 미사용, 확장 대비).
      */
     long countByStatus(Order.OrderStatus status);
+
+    // ─── PortOne 결제 (6/5): complete 검증용 ───────────────────────────
+    /**
+     * paymentId 로 주문을 items + product 까지 fetch 해서 조회.
+     *
+     * 결제완료(complete) 검증에서 사용 — confirmPayment 가 각 OrderItem 의 product 로
+     * 재고를 차감해야 하므로 items 와 product 를 함께 로딩한다(LAZY 접근 시 트랜잭션 밖 예외 방지).
+     * payment_id 는 unique 라 결과는 0 또는 1건.
+     */
+    @Query("SELECT o FROM Order o " +
+           "LEFT JOIN FETCH o.items i " +
+           "LEFT JOIN FETCH i.product " +
+           "WHERE o.paymentId = :paymentId")
+    java.util.Optional<Order> findByPaymentIdWithItems(@Param("paymentId") String paymentId);
 }
