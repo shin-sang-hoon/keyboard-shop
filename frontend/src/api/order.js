@@ -64,3 +64,53 @@ export async function createOrderDirect(payload) {
   const res = await apiClient.post('/orders/direct', payload);
   return res.data;
 }
+
+// ============================================================================
+// PortOne V2 결제 (6/5) — prepare / complete
+//
+// 정식 결제 흐름. 위 createOrder/createOrderDirect(mock 즉시 PAID)를 대체한다.
+//   1) prepare → 서버가 PENDING 주문 생성 + paymentId 발급 (재고 미차감)
+//   2) (호출부) PortOne.requestPayment 로 결제창 → 결제
+//   3) complete → 서버가 PortOne 단건조회로 금액검증 → 재고차감 + PAID
+//
+// prepare 응답(PrepareResponse): { orderId, paymentId, orderName, amount, storeId, channelKey }
+//   storeId/channelKey 는 결제창(requestPayment) 호출에 그대로 넘긴다.
+// complete 응답: OrderDto.Response (확정된 주문).
+// ============================================================================
+
+/**
+ * 결제 준비 — 장바구니 기반. 서버가 인증 사용자의 장바구니로 PENDING 주문을 만들고
+ * paymentId 를 발급한다(재고 미차감). 배송지는 shipping 으로 전달.
+ *
+ * @param {Object} shipping 배송지 { receiverName, receiverPhone, postcode, address, addressDetail }
+ * @returns {Promise<Object>} PrepareResponse { orderId, paymentId, orderName, amount, storeId, channelKey }
+ */
+export async function preparePaymentCart(shipping) {
+  const res = await apiClient.post('/payments/prepare/cart', { shipping });
+  return res.data;
+}
+
+/**
+ * 결제 준비 — 즉시구매 기반. 단건 상품(+옵션)으로 PENDING 주문 생성 + paymentId 발급.
+ * 가격은 서버가 재계산(위변조 차단). 배송지는 shipping 으로 전달.
+ *
+ * @param {Object} payload { productId, quantity, layout?, switchType?, keycapColor?, caseColor?, shipping }
+ * @returns {Promise<Object>} PrepareResponse { orderId, paymentId, orderName, amount, storeId, channelKey }
+ */
+export async function preparePaymentDirect(payload) {
+  const res = await apiClient.post('/payments/prepare/direct', payload);
+  return res.data;
+}
+
+/**
+ * 결제 완료 — 결제창 결제 후 호출. 서버가 PortOne 단건조회로 "실제 PAID + 금액 일치"를
+ * 검증하고 통과 시 재고 차감 + PAID 전환. 검증 실패 시 400 (주문은 서버에서 CANCELLED).
+ * 멱등 — 이미 PAID 면 그대로 성공 반환.
+ *
+ * @param {string} paymentId prepare 에서 받은 결제 식별자
+ * @returns {Promise<Object>} OrderDto.Response (확정된 주문)
+ */
+export async function completePayment(paymentId) {
+  const res = await apiClient.post('/payments/complete', { paymentId });
+  return res.data;
+}

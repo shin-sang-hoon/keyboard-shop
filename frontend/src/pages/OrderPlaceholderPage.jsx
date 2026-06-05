@@ -1,27 +1,35 @@
 // frontend/src/pages/OrderPlaceholderPage.jsx
-// Phase 8 5-D Round 3 (2026-05-19) — 주문 placeholder 페이지.
+// PortOne V2 결제 연동 (6/5) — 주문/결제 페이지.
 //
 // 도메인 흐름:
-//   CartPage 의 "주문하기" CTA → /order → 주문 요약 표시 → "주문 완료 (mock)" → clearCart() → / 메인
+//   진입: CartPage "주문하기" → /order  또는  상품상세/3D빌더 "바로구매" → /order?type=direct&...
+//   ① 배송지 입력 (DaumPostcode) → ② "결제하기"
+//   → preparePayment* (서버: PENDING 주문 + paymentId 발급, 재고 미차감)
+//   → PortOne.requestPayment (결제창 팝업, 실제 결제)
+//   → completePayment (서버: PortOne 단건조회 금액검증 → 재고차감 + PAID)
+//   → 마이페이지(주문완료)
 //
-// Phase 8 (배포) 시 본격 구현 예정:
-//   - 토스 페이먼츠 / 아임포트 등 PG 사 연동
-//   - 배송지 입력 폼 (Daum 우편번호 API)
-//   - 주문 내역 DB 저장 (orders + order_items)
-//   - 결제 검증 webhook
+// 보존 (이전 mock 버전에서 그대로):
+//   - direct/cart 다형 처리 (?type=direct 분기, 표시 데이터 통합)
+//   - 비로그인/빈카트 가드, 즉시구매 상품 서버 재조회 + 표시단가 계산
+//   - OrderItemRow, 결제 요약 UI, swagkey 라이트 톤 스타일
 //
-// 현재 구현 범위 (mock):
-//   - Cart 비어있으면 /cart 리다이렉트 (가드)
-//   - 주문 요약 표시 (CartPage 의 데이터 그대로 활용)
-//   - "주문 완료" 클릭 → clearCart() + Toast + / 이동
-//   - swagkey 라이트 톤 통일
+// 교체 (PortOne 연동):
+//   - mock 안내 배너 제거
+//   - 배송지: placeholder 문구 → 실제 입력 폼 (이름/연락처/우편번호/주소/상세 + Daum 검색)
+//   - 결제 수단: placeholder 문구 → 안내(결제창에서 선택)
+//   - 결제 버튼: "결제하기 (mock)" → "결제하기", window.confirm 제거
+//   - 금액은 서버가 prepare 에서 산출/저장하고 complete 에서 PG 원본과 재대조(프론트 금액 불신).
 
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, Navigate, useSearchParams } from 'react-router-dom';
+import * as PortOne from '@portone/browser-sdk/v2';
 import { useCartStore } from '../stores/cartStore';
 import { useAuth } from '../hooks/useAuth';
-import { createOrder, createOrderDirect } from '../api/order';
+import { preparePaymentCart, preparePaymentDirect, completePayment } from '../api/order';
 import { apiClient } from '../api/client';
+import userApi from '../api/user';
+import DaumPostcode from '../components/DaumPostcode';
 import { colors, spacing, radius } from '../styles/tokens';
 
 export default function OrderPlaceholderPage() {
@@ -32,8 +40,6 @@ export default function OrderPlaceholderPage() {
   // ─── 주문 출처 판별 (다형 처리) ──────────────────────
   //   ?type=direct → 즉시구매: URL 의 productId/qty/옵션으로 단건 주문 (장바구니 미경유).
   //   그 외(기본)  → 장바구니 주문: cartStore 의 담긴 품목으로 주문.
-  //   두 경로가 같은 주문서 UI(OrderItemRow·결제 요약)를 공유하고, 데이터 소스와
-  //   결제 호출(createOrderDirect vs createOrder)만 분기한다.
   const isDirect = searchParams.get('type') === 'direct';
   const directProductId = searchParams.get('productId');
   const directQty = Math.max(1, parseInt(searchParams.get('qty') || '1', 10) || 1);
@@ -58,8 +64,18 @@ export default function OrderPlaceholderPage() {
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState(null);
 
+  // ─── 배송지 입력 폼 ──────────────────────────────────
+  //   ProfileEditPage 와 동일하게 userApi.getMe 로 저장된 주소를 prefill, 사용자가 수정 가능.
+  //   DaumPostcode 컴포넌트(open/onClose/onComplete) 재사용.
+  const [receiverName, setReceiverName] = useState('');
+  const [receiverPhone, setReceiverPhone] = useState('');
+  const [postcode, setPostcode] = useState('');
+  const [address, setAddress] = useState('');
+  const [addressDetail, setAddressDetail] = useState('');
+  const [postOpen, setPostOpen] = useState(false);
+  const [shipError, setShipError] = useState('');
+
   // 즉시구매: 상품 정보를 서버에서 조회 (가격/이름/이미지는 표시용 — 실제 금액은 결제 시 서버 재계산).
-  // 커스텀 옵션이 있으면 서버 가격표와 동일한 규칙으로 표시 단가를 보정한다.
   useEffect(() => {
     if (!isDirect || !directProductId) return;
     let alive = true;
@@ -94,6 +110,22 @@ export default function OrderPlaceholderPage() {
   }, [isDirect, directProductId, directQty,
       directOpts.layout, directOpts.switchType, directOpts.keycapColor, directOpts.caseColor]);
 
+  // 배송지 prefill — 저장된 회원 주소/연락처/이름을 기본값으로 채운다(수정 가능).
+  useEffect(() => {
+    let alive = true;
+    userApi.getMe()
+      .then((me) => {
+        if (!alive) return;
+        setReceiverName((prev) => prev || me.name || '');
+        setReceiverPhone((prev) => prev || me.phone || '');
+        setPostcode((prev) => prev || me.zipcode || '');
+        setAddress((prev) => prev || me.address || '');
+        setAddressDetail((prev) => prev || me.addressDetail || '');
+      })
+      .catch(() => { /* prefill 실패는 무시 — 사용자가 직접 입력 */ });
+    return () => { alive = false; };
+  }, []);
+
   // ─── 표시 데이터 통합 (direct/cart 공통 렌더용) ──────
   const items = isDirect ? (directItem ? [directItem] : []) : cartItems;
   const totalQuantity = isDirect ? (directItem ? directItem.quantity : 0) : cartTotalQuantity;
@@ -108,8 +140,6 @@ export default function OrderPlaceholderPage() {
   }
 
   // ─── 가드: 장바구니 경로에서 카트 비어있으면 카트로 ──
-  //   direct 경로는 cart 와 무관하므로 이 가드를 적용하지 않는다.
-  //   submitting 중이면 우회 — clearCart() 직후 unmount 방지 (Toast 표시 보장).
   if (!isDirect && (!cartItems || cartItems.length === 0) && !submitting) {
     return <Navigate to="/cart" replace />;
   }
@@ -119,51 +149,95 @@ export default function OrderPlaceholderPage() {
     setTimeout(() => setToast(null), 3500);
   }
 
-  // ─── 주문 완료 (실제 주문 생성 → 결제는 mock) ─────────
-  //   direct  : createOrderDirect({productId, quantity, 옵션}) — 장바구니 미경유, clearCart 불필요.
-  //   cart    : createOrder() — 서버가 장바구니를 직접 읽어 주문, 성공 후 clearCart.
-  //   두 경우 모두 성공해야만 Toast → (cart 만 clearCart) → navigate. 실패(예: 재고 부족 409) 시
-  //   장바구니/화면을 보존해 데이터 유실과 중복 주문을 막는다.
-  async function handleSubmitOrder() {
+  // 배송지 필수값 검증 — 빈 값이면 결제 진행 차단.
+  function validateShipping() {
+    if (!receiverName.trim()) return '받는 분 이름을 입력해 주세요.';
+    if (!receiverPhone.trim()) return '연락처를 입력해 주세요.';
+    if (!postcode.trim() || !address.trim()) return '주소를 검색해 주세요.';
+    if (!addressDetail.trim()) return '상세 주소를 입력해 주세요.';
+    return '';
+  }
+
+  // ─── 결제 (prepare → PortOne 결제창 → complete) ──────
+  //   1) prepare: 서버가 PENDING 주문 + paymentId 발급(재고 미차감). storeId/channelKey 수령.
+  //   2) PortOne.requestPayment: 결제창 팝업. 결제수단은 여기서 선택. 결과로 code/message(실패) 반환.
+  //   3) complete: 서버가 PortOne 단건조회로 금액검증 → 재고차감 + PAID. 실패 시 400(주문 CANCELLED).
+  //   금액은 프론트가 정하지 않는다 — prepare 응답의 amount(서버 산출)를 결제창에 넘기고,
+  //   complete 에서 서버가 PG 원본과 DB 금액을 재대조한다(위변조 차단).
+  async function handlePayment() {
     if (submitting) return;
-    if (!window.confirm(
-      `총 ${totalQuantity}개 / ₩${totalPrice.toLocaleString()} 결제하시겠습니까?\n\n` +
-      `(결제 자체는 mock 동작 - 실제 PG 연동은 Phase 8 배포 단계에서 도입 예정)`
-    )) return;
+
+    const shipErr = validateShipping();
+    if (shipErr) {
+      setShipError(shipErr);
+      showToast(shipErr);
+      return;
+    }
+    setShipError('');
+
+    const shipping = {
+      receiverName: receiverName.trim(),
+      receiverPhone: receiverPhone.trim(),
+      postcode: postcode.trim(),
+      address: address.trim(),
+      addressDetail: addressDetail.trim(),
+    };
 
     setSubmitting(true);
     try {
-      // 1) 실제 주문 생성 (서버가 재고 차감 + orders/order_items 저장, 가격은 서버 재계산)
-      const order = isDirect
-        ? await createOrderDirect({
+      // 1) 결제 준비 — PENDING 주문 생성 + paymentId 발급
+      const prep = isDirect
+        ? await preparePaymentDirect({
             productId: directItem.productId,
             quantity: directItem.quantity,
             layout: directItem.layout,
             switchType: directItem.switchType,
             keycapColor: directItem.keycapColor,
             caseColor: directItem.caseColor,
+            shipping,
           })
-        : await createOrder();
+        : await preparePaymentCart(shipping);
 
-      // 2) 주문 생성 성공 → Toast 먼저 (화면을 마지막까지 정상 상태로 유지)
-      showToast(`주문이 완료되었습니다 (주문번호 ${order?.id ?? '-'})`);
+      // 2) PortOne 결제창 — storeId/channelKey/paymentId 는 서버 prepare 응답 값 사용.
+      //    currency 는 V2 SDK 표준 enum "CURRENCY_KRW".
+      const payResponse = await PortOne.requestPayment({
+        storeId: prep.storeId,
+        channelKey: prep.channelKey,
+        paymentId: prep.paymentId,
+        orderName: prep.orderName,
+        totalAmount: prep.amount,
+        currency: 'CURRENCY_KRW',
+        payMethod: 'CARD',
+        customer: {
+          fullName: shipping.receiverName,
+          phoneNumber: shipping.receiverPhone,
+          email: user?.email || undefined,
+        },
+      });
 
-      // 3) 2.5초 후 정리 + 이동 (Toast 충분히 표시 후).
-      //    direct 는 장바구니를 건드리지 않으므로 clearCart 를 건너뛴다.
+      // 결제창에서 실패/취소 시 code 가 채워져 온다(성공이면 code 없음).
+      if (payResponse?.code != null) {
+        console.warn('PortOne payment failed:', payResponse);
+        showToast(payResponse.message || '결제가 취소되었거나 실패했습니다.');
+        setSubmitting(false);
+        return;
+      }
+
+      // 3) 결제 완료 검증 — 서버가 PortOne 단건조회로 금액 대조 후 PAID 확정.
+      const order = await completePayment(prep.paymentId);
+
+      showToast(`결제가 완료되었습니다 (주문번호 ${order?.id ?? '-'})`);
+
+      // 장바구니 결제였다면 비우기(서버에서도 비웠지만 클라 상태도 동기화) 후 마이페이지로.
       setTimeout(async () => {
         if (!isDirect) {
-          try {
-            await clearCart();
-          } catch (e) {
-            console.warn('clearCart after order:', e);
-          }
+          try { await clearCart(); } catch (e) { console.warn('clearCart after order:', e); }
         }
         navigate('/mypage', { replace: true });
-      }, 2500);
+      }, 2000);
     } catch (err) {
-      // 주문 생성 실패 — 장바구니/화면 그대로 보존, 재시도 가능
-      console.error('createOrder error:', err);
-      const msg = err?.response?.data?.message || '주문 처리에 실패했습니다. 다시 시도해주세요.';
+      console.error('payment error:', err);
+      const msg = err?.response?.data?.message || '결제 처리에 실패했습니다. 다시 시도해 주세요.';
       showToast(msg);
       setSubmitting(false);
     }
@@ -211,18 +285,8 @@ export default function OrderPlaceholderPage() {
 
         <h1 style={S.title}>{isDirect ? '바로 구매' : '주문/결제'}</h1>
 
-        {/* mock 안내 배너 */}
-        <div style={S.mockBanner}>
-          <strong style={S.mockBannerTitle}>⚠️ 결제 Mock 동작</strong>
-          <div style={S.mockBannerDesc}>
-            주문은 실제로 생성·저장되어 <strong>마이페이지 &gt; 주문내역</strong>에 반영됩니다.
-            다만 실제 결제 (토스 페이먼츠 / 아임포트) 연동은
-            <strong> Phase 8 배포 단계</strong>에서 도입 예정 — 현재 결제 자체는 mock.
-          </div>
-        </div>
-
         <div style={S.body}>
-          {/* 좌측: 주문 상품 */}
+          {/* 좌측: 주문 상품 + 배송지 입력 */}
           <div style={S.leftCol}>
             <div style={S.section}>
               <h3 style={S.sectionTitle}>주문 상품 ({items.length})</h3>
@@ -243,24 +307,67 @@ export default function OrderPlaceholderPage() {
               </div>
             </div>
 
+            {/* 배송지 입력 폼 (DaumPostcode) */}
             <div style={S.section}>
               <h3 style={S.sectionTitle}>배송지 정보</h3>
-              <div style={S.fieldRow}>
-                <span style={S.fieldLabel}>주소</span>
-                <span style={S.fieldValuePlaceholder}>
-                  Phase 8에서 Daum 우편번호 API 연동 예정
-                </span>
+
+              <label style={S.formLabel}>받는 분</label>
+              <input
+                value={receiverName}
+                onChange={(e) => setReceiverName(e.target.value)}
+                placeholder="받는 분 이름"
+                maxLength={100}
+                style={S.input}
+              />
+
+              <label style={S.formLabel}>연락처</label>
+              <input
+                value={receiverPhone}
+                onChange={(e) => setReceiverPhone(e.target.value)}
+                placeholder="010-0000-0000"
+                maxLength={30}
+                style={S.input}
+              />
+
+              <label style={S.formLabel}>우편번호</label>
+              <div style={S.zipRow}>
+                <input
+                  value={postcode}
+                  readOnly
+                  placeholder="우편번호"
+                  style={{ ...S.input, ...S.readonly, flex: '0 0 140px', marginBottom: 0 }}
+                />
+                <button type="button" onClick={() => setPostOpen(true)} style={S.searchBtn}>
+                  주소 검색
+                </button>
               </div>
+
+              <label style={S.formLabel}>기본 주소</label>
+              <input
+                value={address}
+                readOnly
+                placeholder="주소 검색 후 자동 입력"
+                style={{ ...S.input, ...S.readonly }}
+              />
+
+              <label style={S.formLabel}>상세 주소</label>
+              <input
+                value={addressDetail}
+                onChange={(e) => setAddressDetail(e.target.value)}
+                placeholder="동/호수/층 등 상세 주소"
+                maxLength={255}
+                style={S.input}
+              />
+
+              {shipError && <div style={S.inlineError}>{shipError}</div>}
             </div>
 
+            {/* 결제 수단 안내 */}
             <div style={S.section}>
               <h3 style={S.sectionTitle}>결제 수단</h3>
-              <div style={S.fieldRow}>
-                <span style={S.fieldLabel}>방법</span>
-                <span style={S.fieldValuePlaceholder}>
-                  Phase 8에서 토스 페이먼츠 / 아임포트 연동 예정
-                </span>
-              </div>
+              <p style={S.payMethodNote}>
+                다음 단계의 결제창에서 카드 등 결제 수단을 선택합니다.
+              </p>
             </div>
           </div>
 
@@ -288,11 +395,11 @@ export default function OrderPlaceholderPage() {
               </div>
 
               <button
-                onClick={handleSubmitOrder}
+                onClick={handlePayment}
                 disabled={submitting}
                 style={{ ...S.submitBtn, opacity: submitting ? 0.6 : 1 }}
               >
-                {submitting ? '처리 중...' : `결제하기 (mock)`}
+                {submitting ? '결제 처리 중...' : '결제하기'}
               </button>
 
               {isDirect ? (
@@ -304,6 +411,17 @@ export default function OrderPlaceholderPage() {
           </aside>
         </div>
       </div>
+
+      {/* Daum 우편번호 레이어 */}
+      <DaumPostcode
+        open={postOpen}
+        onClose={() => setPostOpen(false)}
+        onComplete={({ zipcode: z, address: a }) => {
+          setPostcode(z);
+          setAddress(a);
+          setPostOpen(false);
+        }}
+      />
 
       {toast && <div style={S.toast}>{toast}</div>}
     </div>
@@ -329,7 +447,6 @@ const CASE_LABEL = {
 // 즉시구매 표시 단가 계산 (서버 BuilderPriceCalculator 와 동일 규칙).
 //   주의: 이 값은 화면 표시용일 뿐, 실제 결제 금액은 서버가 결제 시점에 다시 계산한다
 //   (위변조 차단의 단일 진실은 서버). 옵션이 없으면 product.price 를 그대로 쓴다.
-//   가격표가 서버와 어긋나면 표시값만 잠깐 다를 뿐 결제는 서버 값으로 처리된다.
 const DISPLAY_SWITCH_PRICE = { LINEAR: 25000, TACTILE: 28000, CLICKY: 30000 };
 const DISPLAY_KEYCAP_PRICE = {
   original: 0, white: 35000, black: 35000, gray: 38000, navy: 38000, red: 42000, mint: 42000,
@@ -429,28 +546,6 @@ const S = {
     color: colors.textOnLight,
     marginBottom: 20,
     letterSpacing: '-0.02em',
-  },
-
-  // Mock 안내 배너
-  mockBanner: {
-    background: 'rgba(245, 158, 11, 0.08)',
-    border: '1px solid rgba(245, 158, 11, 0.3)',
-    borderLeft: '3px solid #f59e0b',
-    borderRadius: 8,
-    padding: '14px 18px',
-    marginBottom: 24,
-  },
-  mockBannerTitle: {
-    display: 'block',
-    fontSize: 13,
-    fontWeight: 700,
-    color: '#92400e',
-    marginBottom: 4,
-  },
-  mockBannerDesc: {
-    fontSize: 13,
-    color: '#78350f',
-    lineHeight: 1.5,
   },
 
   body: {
@@ -555,7 +650,7 @@ const S = {
     textAlign: 'right',
   },
 
-  // 주문자 / 배송지 / 결제 정보 행
+  // 주문자 정보 행
   fieldRow: {
     display: 'flex',
     gap: 16,
@@ -572,10 +667,65 @@ const S = {
     color: colors.textOnLight,
     fontWeight: 500,
   },
-  fieldValuePlaceholder: {
-    color: colors.textOnLightDim,
-    fontStyle: 'italic',
+
+  // 배송지 입력 폼
+  formLabel: {
+    display: 'block',
     fontSize: 13,
+    fontWeight: 600,
+    color: colors.textOnLight,
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  input: {
+    display: 'block',
+    width: '100%',
+    padding: '10px 12px',
+    border: '1px solid #e5e7eb',
+    borderRadius: 8,
+    fontSize: 14,
+    fontFamily: 'inherit',
+    boxSizing: 'border-box',
+    color: colors.textOnLight,
+    background: colors.white,
+    marginBottom: 4,
+  },
+  readonly: {
+    background: colors.surfaceMuted,
+    color: colors.textOnLightDim,
+    cursor: 'not-allowed',
+  },
+  zipRow: {
+    display: 'flex',
+    gap: 8,
+    alignItems: 'center',
+  },
+  searchBtn: {
+    flex: 1,
+    padding: '10px 12px',
+    background: colors.white,
+    border: `1px solid ${colors.textOnLight}`,
+    borderRadius: 8,
+    color: colors.textOnLight,
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+  inlineError: {
+    marginTop: 10,
+    background: '#fef2f2',
+    border: '1px solid #fecaca',
+    color: '#dc2626',
+    fontSize: 13,
+    padding: '8px 12px',
+    borderRadius: 8,
+  },
+  payMethodNote: {
+    fontSize: 13,
+    color: colors.textOnLightDim,
+    lineHeight: 1.5,
+    margin: 0,
   },
 
   // 우측 sticky 결제 요약
