@@ -4,12 +4,16 @@
 > 키크론(상품)과 스웨그키(swagkey, 프론트)를 결합한 컨셉의 **1인 풀스택** 웹 서비스
 
 [![Live Demo](https://img.shields.io/badge/🌐_Live_Demo-swachron.shop-4CAF50?style=for-the-badge&logoColor=white)](https://swachron.shop)
+[![Portfolio PDF](https://img.shields.io/badge/📄_PORTFOLIO_PDF-31_PAGES-FF6B6B?style=for-the-badge&logoColor=white)](./SWACHRON_portfolio_31pages.pdf)
 [![GitHub](https://img.shields.io/badge/GitHub-Repository-181717?style=for-the-badge&logo=github)](https://github.com/shin-sang-hoon/keyboard-shop)
 [![Last Commit](https://img.shields.io/github/last-commit/shin-sang-hoon/keyboard-shop?style=for-the-badge&color=4CAF50)](https://github.com/shin-sang-hoon/keyboard-shop/commits/main)
 [![Top Language](https://img.shields.io/github/languages/top/shin-sang-hoon/keyboard-shop?style=for-the-badge&color=2196F3)](https://github.com/shin-sang-hoon/keyboard-shop)
 
 > 🌐 **[라이브 데모 바로가기 → https://swachron.shop](https://swachron.shop)** ⭐  
 > AWS에 **HTTPS로 실제 배포**된 서비스입니다. 홈 · 상품 · 3D 빌더 · 장바구니 · 결제(테스트) · AI 챗봇 · 실시간 경매를 직접 체험할 수 있습니다.
+
+> 📄 **[포트폴리오 PDF 다운로드 (31페이지)](./SWACHRON_portfolio_31pages.pdf)**  
+> 아키텍처 · API 설계부터 주요 화면(3D 빌더 · 실시간 경매 · AI 챗봇)과 트러블슈팅까지 시각적으로 정리한 자료입니다.
 
 ---
 
